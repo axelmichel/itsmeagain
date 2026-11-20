@@ -13,9 +13,6 @@ public final class Conversation {
     public var taskRaw: String = TaskKind.chat.rawValue
     /// Auto mode: every message is routed to a task; `task` then holds the last routed one.
     public var autoRoute: Bool = false
-    /// Per-conversation override of the task's provider/model; `nil` follows the task mapping.
-    public var providerOverride: String?
-    public var modelOverride: String?
     /// Translate target; `nil` uses the app default.
     public var targetLanguage: String?
 

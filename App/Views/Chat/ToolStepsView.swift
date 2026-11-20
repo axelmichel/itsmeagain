@@ -13,7 +13,8 @@ struct ToolStepsView: View {
             }
         }
         .font(.callout)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.tertiary)
+        .tint(.secondary)
     }
 }
 

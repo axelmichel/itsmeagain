@@ -30,7 +30,7 @@ struct ChatView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
         .defaultScrollAnchor(.bottom)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 0) {
                 let queued = app.chat.queue(for: conversation)
                 if !queued.isEmpty {
                     QueuedMessagesView(
@@ -43,14 +43,16 @@ struct ChatView: View {
                         onRemove: { app.chat.removeQueued($0.id, from: conversation) },
                         onResume: { app.chat.resume(conversation) }
                     )
+                    .padding(.top, 8)
                 }
                 ComposerResizeHandle(height: $composerHeight, maxHeight: max(Composer.minHeight, viewportHeight * 0.6))
                 TaskBar(conversation: conversation)
+                    .padding(.bottom, 8)
                 Composer(text: $draft, height: composerHeight, isStreaming: isStreaming, onSend: send) {
                     app.chat.stop(conversation)
                 }
             }
-            .background(Theme.panel)
+            .background(Theme.header)
             .overlay(alignment: .top) { Theme.border.frame(height: 1) }
         }
         .navigationTitle(conversation.title)

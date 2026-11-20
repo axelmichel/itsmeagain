@@ -50,10 +50,11 @@ struct Composer: View {
             .buttonStyle(.borderless)
             .font(.title2)
         }
-        .padding(10)
-        .background(Theme.field, in: .rect(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
-        .padding([.horizontal, .bottom], 12)
+        // Full-width editor area; only a line separates it from the task bar.
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Theme.field)
+        .overlay(alignment: .top) { Theme.border.frame(height: 1) }
         .onAppear { focused = true }
     }
 
@@ -73,9 +74,9 @@ struct ComposerResizeHandle: View {
     @State private var startHeight: Double?
 
     var body: some View {
-        Capsule()
+        Rectangle()
             .fill(.tertiary)
-            .frame(width: 36, height: 4)
+            .frame(width: 36, height: 3)
             .frame(maxWidth: .infinity)
             .frame(height: 10)
             .contentShape(.rect)

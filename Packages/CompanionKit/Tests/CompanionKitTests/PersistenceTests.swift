@@ -25,3 +25,18 @@ import Testing
         #expect(conversation.chatMessages == [.user("one"), .assistant("two"), .user("three")])
     }
 }
+
+/// Opens a copy of a real store with the current schema (migration check before shipping schema changes).
+/// `ITSMEAGAIN_STORE_COPY=/path/to/copy.store swift test --filter StoreMigrationTests`
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["ITSMEAGAIN_STORE_COPY"] != nil))
+struct StoreMigrationTests {
+    @MainActor
+    @Test func opensExistingStore() throws {
+        let url = URL(filePath: ProcessInfo.processInfo.environment["ITSMEAGAIN_STORE_COPY"]!)
+        let container = try ModelContainer(for: Schema(CompanionSchema.models), configurations: ModelConfiguration(url: url))
+        let conversations = try container.mainContext.fetch(FetchDescriptor<Conversation>())
+        let messages = try container.mainContext.fetch(FetchDescriptor<StoredMessage>())
+        print("MIGRATED: \(conversations.count) conversations, \(messages.count) messages")
+        #expect(!conversations.isEmpty)
+    }
+}

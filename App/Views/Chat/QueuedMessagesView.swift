@@ -39,7 +39,7 @@ struct QueuedMessagesView: View {
                 .buttonStyle(.borderless)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Theme.raised, in: .rect(cornerRadius: 8))
+                .background(Theme.selection)
             }
         }
         .padding(.horizontal, 12)

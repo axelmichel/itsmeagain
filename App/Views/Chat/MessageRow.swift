@@ -16,17 +16,22 @@ struct MessageRow: View {
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Theme.raised, in: .rect(cornerRadius: 12))
+                    .background(Theme.selection)
             }
         default:
             VStack(alignment: .leading, spacing: 8) {
                 if !message.thinking.isEmpty {
-                    DisclosureGroup("Thinking") {
+                    DisclosureGroup {
                         Text(message.thinking)
                             .font(.callout)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.tertiary)
                             .textSelection(.enabled)
+                    } label: {
+                        Text("Thinking")
+                            .font(.callout)
+                            .foregroundStyle(.tertiary)
                     }
+                    .tint(.secondary)
                 }
                 let steps = message.toolSteps
                 if !steps.isEmpty {
@@ -112,7 +117,7 @@ struct CodeBlock: View {
                     .padding(10)
             }
         }
-        .background(Theme.recessed, in: .rect(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border.opacity(0.6)))
+        .background(Theme.recessed)
+        .overlay(Rectangle().strokeBorder(Theme.border.opacity(0.6)))
     }
 }

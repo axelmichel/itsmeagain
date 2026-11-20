@@ -1,0 +1,25 @@
+{
+  "fill": {
+    "automatic-gradient": "extended-srgb:0.12549,0.13725,0.16471,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "logo.png",
+          "name": "logo",
+          "position": {
+            "scale": 1.45,
+            "translation-in-points": [
+              0,
+              -10
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

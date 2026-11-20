@@ -31,6 +31,23 @@ private struct GeneralSettings: View {
         @Bindable var app = app
         Form {
             Section {
+                LabeledContent("Shortcut") {
+                    ShortcutRecorder(shortcut: $app.quickPanelShortcut) { app.suspendHotKey($0) }
+                }
+                if !app.hotKeyRegistered {
+                    Text("This shortcut is taken by another app or macOS. Choose a different one.")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                }
+                Toggle("Show in Menu Bar", isOn: $app.showMenuBarIcon)
+            } header: {
+                Text("Quick Panel")
+            } footer: {
+                Text("Opens a floating panel from anywhere for a quick question or translation. Translate pre-fills the clipboard.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Use Apple Intelligence when available", isOn: $app.preferAppleRouter)
                 if let reason = AppleOnDeviceProvider.unavailableReason {
                     Text(reason)
@@ -53,7 +70,7 @@ private struct GeneralSettings: View {
             WebSearchSection()
         }
         .formStyle(.grouped)
-        .frame(height: 560)
+        .frame(height: 680)
     }
 }
 

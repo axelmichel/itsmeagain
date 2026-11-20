@@ -7,6 +7,7 @@ import Persistence
 import Providers
 import Routing
 import SwiftData
+import SwiftUI
 import Tools
 
 /// App-wide state: configured providers, task → model mapping, routing, and the chat engine.
@@ -25,6 +26,8 @@ final class AppModel {
         static let searchBackend = "searchBackend"
         static let searxngURL = "searxngURL"
         static let legacyOllamaHost = "ollamaHost"
+        static let quickPanelShortcut = "quickPanelShortcut"
+        static let showMenuBarIcon = "showMenuBarIcon"
     }
 
     private let defaults: UserDefaults
@@ -77,6 +80,28 @@ final class AppModel {
     let chat = ChatController()
     let knowledge: KnowledgeModel
 
+    // MARK: Quick panel & windows
+
+    var quickPanelShortcut: HotKeyShortcut? {
+        didSet {
+            defaults.set(try? JSONEncoder().encode(quickPanelShortcut), forKey: Keys.quickPanelShortcut)
+            registerHotKey()
+        }
+    }
+
+    var showMenuBarIcon: Bool {
+        didSet { defaults.set(showMenuBarIcon, forKey: Keys.showMenuBarIcon) }
+    }
+
+    /// False when the system refused the shortcut (usually another app owns it).
+    private(set) var hotKeyRegistered = true
+    /// The main window selects this conversation when set (e.g. "Open in ItsMeAgain" from the quick panel).
+    var requestedConversation: PersistentIdentifier?
+    @ObservationIgnored private(set) var quickPanel: QuickPanelController?
+    @ObservationIgnored private var hotKey: GlobalHotKey?
+    /// SwiftUI's openWindow, captured from a view that lives as long as the app (the menu bar label).
+    @ObservationIgnored var openWindowAction: OpenWindowAction?
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
@@ -103,8 +128,41 @@ final class AppModel {
         preferAppleRouter = defaults.object(forKey: Keys.preferAppleRouter) as? Bool ?? true
         searchBackend = defaults.string(forKey: Keys.searchBackend).flatMap(SearchBackendKind.init(rawValue:)) ?? .wikipedia
         searxngURL = defaults.string(forKey: Keys.searxngURL) ?? "http://localhost:8888"
+        quickPanelShortcut = defaults.data(forKey: Keys.quickPanelShortcut)
+            .flatMap { try? JSONDecoder().decode(HotKeyShortcut?.self, from: $0) } ?? .optionSpace
+        showMenuBarIcon = defaults.object(forKey: Keys.showMenuBarIcon) as? Bool ?? true
         knowledge = KnowledgeModel(defaults: defaults)
         knowledge.ollama = { [weak self] in self?.ollamaProvider ?? OllamaProvider() }
+    }
+
+    func installQuickPanel(container: ModelContainer) {
+        quickPanel = QuickPanelController(app: self, container: container)
+        hotKey = GlobalHotKey { [weak self] in self?.quickPanel?.toggle() }
+        registerHotKey()
+    }
+
+    /// Temporarily off while the user records a new shortcut.
+    func suspendHotKey(_ suspended: Bool) {
+        suspended ? hotKey?.unregister() : registerHotKey()
+    }
+
+    private func registerHotKey() {
+        guard let hotKey else { return }
+        if let quickPanelShortcut {
+            hotKeyRegistered = hotKey.register(quickPanelShortcut)
+        } else {
+            hotKey.unregister()
+            hotKeyRegistered = true
+        }
+    }
+
+    func openMainWindow() {
+        NSApp.activate()
+        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }) {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            openWindowAction?(id: "main")
+        }
     }
 
     /// The configured Ollama server, also used for embeddings and model downloads.
@@ -227,9 +285,6 @@ final class AppModel {
 
     /// What the next turn of `conversation` will use (for Auto: the last routed task's mapping).
     func effectiveModel(for conversation: Conversation) -> ModelRef {
-        if let model = conversation.modelOverride {
-            return ModelRef(provider: ProviderID(conversation.providerOverride ?? ProviderID.ollama.rawValue), model: model)
-        }
         let profile = taskProfiles[conversation.task]
         return ModelRef(provider: profile.providerID, model: profile.modelID)
     }
@@ -238,13 +293,11 @@ final class AppModel {
         conversation.targetLanguage ?? defaultTargetLanguage
     }
 
-    /// Switches to a fixed task; a per-conversation model override belongs to the old task, so it is dropped.
+    /// Switches the conversation to a fixed task (its model comes from the task mapping).
     func select(_ task: TaskKind, for conversation: Conversation) {
         guard conversation.task != task || conversation.autoRoute else { return }
         conversation.task = task
         conversation.autoRoute = false
-        conversation.providerOverride = nil
-        conversation.modelOverride = nil
         lastTask = task
         lastAuto = false
     }
@@ -252,8 +305,6 @@ final class AppModel {
     func selectAuto(for conversation: Conversation) {
         guard !conversation.autoRoute else { return }
         conversation.autoRoute = true
-        conversation.providerOverride = nil
-        conversation.modelOverride = nil
         lastAuto = true
     }
 
