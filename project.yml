@@ -1,0 +1,52 @@
+name: ItsMeAgain
+options:
+  bundleIdPrefix: com.axelmichel
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_STRICT_CONCURRENCY: complete
+
+packages:
+  CompanionKit:
+    path: Packages/CompanionKit
+
+targets:
+  ItsMeAgain:
+    type: application
+    platform: macOS
+    sources:
+      - App
+    dependencies:
+      - package: CompanionKit
+        products: [CompanionCore, Providers, Persistence]
+    entitlements:
+      path: App/ItsMeAgain.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-only: true
+    settings:
+      base:
+        PRODUCT_NAME: ItsMeAgain
+        PRODUCT_BUNDLE_IDENTIFIER: com.axelmichel.itsmeagain
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ItsMeAgain
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+
+schemes:
+  ItsMeAgain:
+    build:
+      targets:
+        ItsMeAgain: all
+    run:
+      config: Debug
