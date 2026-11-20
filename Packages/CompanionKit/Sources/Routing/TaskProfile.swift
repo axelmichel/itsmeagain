@@ -84,7 +84,8 @@ public struct TaskProfile: Codable, Sendable, Hashable, Identifiable {
                 contextLength: contextLength,
                 keepAlive: keepAlive,
                 think: think
-            )
+            ),
+            targetLanguage: task == .translate ? targetLanguage : nil
         )
     }
 }
@@ -170,5 +171,18 @@ public enum Languages {
         "Swedish", "Danish", "Norwegian", "Finnish", "Czech", "Greek", "Turkish", "Russian",
         "Ukrainian", "Arabic", "Hebrew", "Hindi", "Chinese (Simplified)", "Chinese (Traditional)",
         "Japanese", "Korean", "Vietnamese", "Thai", "Indonesian",
+    ]
+
+    /// BCP 47 code for a name from `common`, for system translation APIs.
+    public static func code(for language: String) -> String? {
+        codes[language]
+    }
+
+    private static let codes: [String: String] = [
+        "English": "en", "German": "de", "French": "fr", "Spanish": "es", "Italian": "it", "Portuguese": "pt",
+        "Dutch": "nl", "Polish": "pl", "Swedish": "sv", "Danish": "da", "Norwegian": "nb", "Finnish": "fi",
+        "Czech": "cs", "Greek": "el", "Turkish": "tr", "Russian": "ru", "Ukrainian": "uk", "Arabic": "ar",
+        "Hebrew": "he", "Hindi": "hi", "Chinese (Simplified)": "zh-Hans", "Chinese (Traditional)": "zh-Hant",
+        "Japanese": "ja", "Korean": "ko", "Vietnamese": "vi", "Thai": "th", "Indonesian": "id",
     ]
 }

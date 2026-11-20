@@ -10,6 +10,8 @@ public final class Conversation {
     public var createdAt: Date
     public var updatedAt: Date
     public var taskRaw: String = TaskKind.chat.rawValue
+    /// Auto mode: every message is routed to a task; `task` then holds the last routed one.
+    public var autoRoute: Bool = false
     /// Per-conversation override of the task's provider/model; `nil` follows the task mapping.
     public var providerOverride: String?
     public var modelOverride: String?
@@ -19,12 +21,13 @@ public final class Conversation {
     @Relationship(deleteRule: .cascade, inverse: \StoredMessage.conversation)
     public var messages: [StoredMessage]
 
-    public init(title: String = "New Conversation", task: TaskKind = .chat) {
+    public init(title: String = "New Conversation", task: TaskKind = .chat, autoRoute: Bool = false) {
         id = UUID()
         self.title = title
         createdAt = .now
         updatedAt = .now
         taskRaw = task.rawValue
+        self.autoRoute = autoRoute
         messages = []
     }
 

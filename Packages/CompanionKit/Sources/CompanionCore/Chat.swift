@@ -87,19 +87,27 @@ public struct ChatRequest: Sendable, Hashable {
     public var messages: [ChatMessage]
     public var tools: [ToolSpec]
     public var options: ChatOptions
+    /// JSON Schema the reply must follow, for backends that support constrained output.
+    public var responseFormat: JSONValue?
+    /// Set for translation turns; dedicated translation backends read it instead of the prompt.
+    public var targetLanguage: String?
 
     public init(
         model: String,
         system: String? = nil,
         messages: [ChatMessage],
         tools: [ToolSpec] = [],
-        options: ChatOptions = .init()
+        options: ChatOptions = .init(),
+        responseFormat: JSONValue? = nil,
+        targetLanguage: String? = nil
     ) {
         self.model = model
         self.system = system
         self.messages = messages
         self.tools = tools
         self.options = options
+        self.responseFormat = responseFormat
+        self.targetLanguage = targetLanguage
     }
 }
 

@@ -98,7 +98,7 @@ import Testing
         let json = #"""
             {"models":[
               {"name":"qwen3:8b","size":5200000000,"details":{"parameter_size":"8.2B","quantization_level":"Q4_K_M"}},
-              {"name":"gemma4:26b","size":16000000000}
+              {"name":"gemma4:26b","size":16000000000,"details":{"parameter_size":"","quantization_level":""}}
             ]}
             """#
         let (session, url) = StubURLProtocol.make { _, _ in .init(body: Data(json.utf8)) }

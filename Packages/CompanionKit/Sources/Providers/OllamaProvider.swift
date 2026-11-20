@@ -38,6 +38,7 @@ public struct OllamaProvider: LLMProvider, Embedder {
             .map { model in
                 let details = [model.details?.parameterSize, model.details?.quantizationLevel]
                     .compactMap { $0 }
+                    .filter { !$0.isEmpty }
                     .joined(separator: " · ")
                 return ModelInfo(id: model.name, sizeBytes: model.size, details: details.isEmpty ? nil : details)
             }
@@ -133,9 +134,10 @@ extension OllamaProvider {
         var options: Options?
         var keepAlive: String?
         var think: Bool?
+        var format: JSONValue?
 
         enum CodingKeys: String, CodingKey {
-            case model, messages, stream, tools, options, think
+            case model, messages, stream, tools, options, think, format
             case keepAlive = "keep_alive"
         }
 
@@ -156,6 +158,7 @@ extension OllamaProvider {
             self.options = options.isEmpty ? nil : options
             keepAlive = request.options.keepAlive
             think = request.options.think
+            format = request.responseFormat
         }
     }
 

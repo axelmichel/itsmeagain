@@ -41,4 +41,15 @@ struct OllamaLiveTests {
 
         #expect(text.lowercased().contains("bonjour"))
     }
+
+    @Test(arguments: [
+        ("Which e-bike under 3000 euros has the best range? Compare current models.", TaskKind.research),
+        ("Why does my SwiftUI list not refresh when the array changes?", .code),
+        ("Wie geht es dir heute?", .chat),
+        ("Can you put 'Guten Morgen, wie geht es dir?' into Spanish for me", .translate),
+    ])
+    func classifiesWithLocalModel(text: String, expected: TaskKind) async throws {
+        let classifier = LLMTaskClassifier(provider: provider, model: model)
+        #expect(try await classifier.classify(text) == expected)
+    }
 }

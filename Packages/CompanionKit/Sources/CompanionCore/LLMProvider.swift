@@ -7,6 +7,9 @@ public struct ProviderID: RawRepresentable, Hashable, Sendable, Codable, CustomS
     public var description: String { rawValue }
 
     public static let ollama = ProviderID("ollama")
+    public static let anthropic = ProviderID("anthropic")
+    public static let appleIntelligence = ProviderID("apple-intelligence")
+    public static let appleTranslation = ProviderID("apple-translation")
 }
 
 public struct ProviderCapabilities: OptionSet, Sendable, Hashable {
