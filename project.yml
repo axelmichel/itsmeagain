@@ -16,6 +16,9 @@ settings:
 packages:
   CompanionKit:
     path: Packages/CompanionKit
+  Highlighter:
+    url: https://github.com/smittytone/HighlighterSwift
+    from: 3.1.0
 
 targets:
   ItsMeAgain:
@@ -26,6 +29,7 @@ targets:
     dependencies:
       - package: CompanionKit
         products: [CompanionCore, Providers, Persistence, Routing, AppleIntelligence, Tools, Knowledge]
+      - package: Highlighter
     entitlements:
       path: App/ItsMeAgain.entitlements
       properties:

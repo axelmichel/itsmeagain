@@ -92,6 +92,7 @@ struct MarkdownView: View {
 struct CodeBlock: View {
     let language: String?
     let code: String
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -111,7 +112,7 @@ struct CodeBlock: View {
             .padding(.vertical, 6)
 
             ScrollView(.horizontal) {
-                Text(code)
+                Text(CodeHighlighter.shared.highlight(code, language: language, dark: colorScheme == .dark) ?? AttributedString(code))
                     .font(.system(.callout, design: .monospaced))
                     .textSelection(.enabled)
                     .padding(10)
