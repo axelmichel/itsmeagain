@@ -5,6 +5,14 @@ import Persistence
 import Routing
 import SwiftData
 
+/// Everything a turn needs once its task is known.
+struct TurnPlan {
+    var provider: any LLMProvider
+    var profile: TaskProfile
+    var model: String
+    var targetLanguage: String
+}
+
 /// Runs model turns for conversations. Streams keep running when the user switches conversations.
 @MainActor
 @Observable
@@ -15,14 +23,12 @@ final class ChatController {
         tasks[conversation.persistentModelID] != nil
     }
 
+    /// Appends the user message right away; `plan` (which may route the message first) runs before streaming.
     func send(
         _ text: String,
         in conversation: Conversation,
-        using provider: any LLMProvider,
-        profile: TaskProfile,
-        model: String,
-        targetLanguage: String,
-        context: ModelContext
+        context: ModelContext,
+        plan: @escaping @MainActor () async throws -> TurnPlan
     ) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isStreaming(conversation) else { return }
@@ -30,19 +36,23 @@ final class ChatController {
         if conversation.messages.isEmpty {
             conversation.title = Self.title(for: text)
         }
-        conversation.append(role: .user, content: text, task: profile.task)
-        let request = profile.makeRequest(
-            history: conversation.chatMessages,
-            model: model,
-            targetLanguage: targetLanguage
-        )
-        let reply = conversation.append(role: .assistant, content: "", modelID: model, task: profile.task)
+        let prompt = conversation.append(role: .user, content: text)
+        let reply = conversation.append(role: .assistant, content: "")
         try? context.save()
 
         let key = conversation.persistentModelID
         tasks[key] = Task {
             do {
-                for try await event in provider.stream(request) {
+                let plan = try await plan()
+                prompt.taskRaw = plan.profile.task.rawValue
+                reply.taskRaw = plan.profile.task.rawValue
+                reply.modelID = plan.model
+                let request = plan.profile.makeRequest(
+                    history: conversation.chatMessages,
+                    model: plan.model,
+                    targetLanguage: plan.targetLanguage
+                )
+                for try await event in plan.provider.stream(request) {
                     switch event {
                     case .textDelta(let delta): reply.content += delta
                     case .thinkingDelta(let delta): reply.thinking += delta

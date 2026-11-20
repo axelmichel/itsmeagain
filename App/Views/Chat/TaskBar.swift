@@ -2,7 +2,7 @@ import Persistence
 import Routing
 import SwiftUI
 
-/// Task, model and (for translation) target language of the next turn.
+/// Task (or Auto), model and (for translation) target language of the next turn.
 struct TaskBar: View {
     @Bindable var conversation: Conversation
     @Environment(AppModel.self) private var app
@@ -10,23 +10,32 @@ struct TaskBar: View {
     var body: some View {
         HStack(spacing: 14) {
             Menu {
+                Button("Auto", systemImage: "wand.and.sparkles") { app.selectAuto(for: conversation) }
+                Divider()
                 ForEach(TaskKind.allCases) { task in
                     Button(task.title, systemImage: task.systemImage) {
                         app.select(task, for: conversation)
                     }
                 }
             } label: {
-                Label(conversation.task.title, systemImage: conversation.task.systemImage)
+                if conversation.autoRoute {
+                    Label("Auto", systemImage: "wand.and.sparkles")
+                } else {
+                    Label(conversation.task.title, systemImage: conversation.task.systemImage)
+                }
             }
-            .help("Task (⌘1–⌘4)")
+            .help(conversation.autoRoute
+                ? "Each message is routed to Chat, Translate, Research or Code (⌘0–⌘4)"
+                : "Task (⌘0–⌘4)")
 
             modelMenu
 
-            if conversation.task == .translate {
+            if conversation.task == .translate || conversation.autoRoute {
                 Picker("Into", selection: targetLanguage) {
                     ForEach(Languages.common, id: \.self) { Text($0).tag($0) }
                 }
                 .fixedSize()
+                .help("Target language for translations")
             }
 
             Spacer()
@@ -38,26 +47,43 @@ struct TaskBar: View {
     }
 
     private var modelMenu: some View {
-        let taskModel = app.taskProfiles[conversation.task].modelID
+        let current = app.effectiveModel(for: conversation)
+        let overridden = conversation.modelOverride != nil
         return Menu {
-            Button("Task Default (\(taskModel))") {
-                conversation.providerOverride = nil
-                conversation.modelOverride = nil
+            if overridden {
+                Button("Use \(conversation.task.title) Mapping") {
+                    conversation.providerOverride = nil
+                    conversation.modelOverride = nil
+                }
+                Divider()
             }
-            Divider()
-            ForEach(app.models) { model in
-                Button(model.displayName) {
-                    conversation.providerOverride = app.ollama.id.rawValue
-                    conversation.modelOverride = model.id
+            ForEach(app.enabledProviders) { config in
+                if let models = app.models[config.id], !models.isEmpty {
+                    Section(config.name) {
+                        ForEach(models) { model in
+                            Button(model.displayName) {
+                                conversation.providerOverride = config.id.rawValue
+                                conversation.modelOverride = model.id
+                            }
+                        }
+                    }
                 }
             }
         } label: {
-            Label(app.effectiveModel(for: conversation), systemImage: conversation.modelOverride == nil ? "cpu" : "cpu.fill")
+            Label(label(for: current), systemImage: app.config(for: current.provider)?.systemImage ?? "cpu")
         }
         .fixedSize()
-        .help(conversation.modelOverride == nil
-            ? "Model mapped to \(conversation.task.title) in Settings"
-            : "Overridden for this conversation")
+        .help(help(overridden: overridden))
+    }
+
+    private func label(for ref: ModelRef) -> String {
+        app.models[ref.provider]?.first { $0.id == ref.model }?.displayName ?? ref.model
+    }
+
+    private func help(overridden: Bool) -> String {
+        if overridden { return "Model chosen for this conversation" }
+        if conversation.autoRoute { return "Model mapped to the last routed task (\(conversation.task.title))" }
+        return "Model mapped to \(conversation.task.title) in Settings → Tasks"
     }
 
     private var targetLanguage: Binding<String> {

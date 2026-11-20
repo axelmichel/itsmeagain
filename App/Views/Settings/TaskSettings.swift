@@ -23,9 +23,14 @@ struct TaskSettings: View {
             .padding([.horizontal, .top])
 
             Form {
-                Section("Model") {
-                    LabeledContent("Provider", value: "Ollama")
-                    ModelPicker(selection: profile.modelID)
+                Section {
+                    ModelPicker(selection: Binding(
+                        get: { ModelRef(provider: profile.wrappedValue.providerID, model: profile.wrappedValue.modelID) },
+                        set: {
+                            profile.wrappedValue.providerID = $0.provider
+                            profile.wrappedValue.modelID = $0.model
+                        }
+                    ))
                     Picker("Thinking", selection: profile.think) {
                         Text("Model Default").tag(Bool?.none)
                         Text("On").tag(Bool?.some(true))
@@ -54,6 +59,12 @@ struct TaskSettings: View {
                                     .frame(width: 30)
                             }
                         }
+                    }
+                } header: {
+                    Text("Model")
+                } footer: {
+                    if let note = providerNote(for: profile.wrappedValue) {
+                        Text(note).foregroundStyle(.secondary)
                     }
                 }
 
@@ -89,5 +100,18 @@ struct TaskSettings: View {
             .formStyle(.grouped)
         }
         .frame(height: 620)
+    }
+
+    private func providerNote(for profile: TaskProfile) -> String? {
+        switch app.config(for: profile.providerID)?.kind {
+        case .anthropic?:
+            "Claude ignores temperature and context window; “Thinking: Off” lowers effort instead."
+        case .appleIntelligence?:
+            "The on-device model has a 4K-token context; long conversations are condensed."
+        case .appleTranslation?:
+            "Apple Translation only translates the latest message; prompt and options are ignored."
+        default:
+            nil
+        }
     }
 }

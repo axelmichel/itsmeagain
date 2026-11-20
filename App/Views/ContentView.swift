@@ -41,7 +41,7 @@ struct ContentView: View {
             selection = empty
             return
         }
-        let conversation = Conversation(task: app.lastTask)
+        let conversation = Conversation(task: app.lastTask, autoRoute: app.lastAuto)
         context.insert(conversation)
         try? context.save()
         selection = conversation
