@@ -159,7 +159,7 @@ final class AppModel {
 
     @discardableResult
     func addProvider(_ preset: ProviderConfig.Preset) -> ProviderConfig {
-        let base = preset.kind == .anthropic ? "anthropic" : preset.name.lowercased()
+        let base = preset.kind == .anthropic ? "anthropic" : preset.kind == .claudeCode ? "claude-code" : preset.name.lowercased()
             .split(whereSeparator: { !$0.isLetter && !$0.isNumber }).first.map(String.init) ?? "provider"
         var id = ProviderID(base)
         var suffix = 2

@@ -1,4 +1,5 @@
 import CompanionCore
+import Providers
 import SwiftUI
 
 /// Add, configure and test model providers. API keys go straight to the Keychain.
@@ -43,8 +44,23 @@ private struct ProviderSection: View {
         Section {
             if config.kind != .appleIntelligence && config.kind != .appleTranslation {
                 TextField("Name", text: $config.name)
-                TextField("Server", text: $config.baseURL, prompt: Text("https://…"))
-                    .onSubmit(refresh)
+                if config.kind == .claudeCode {
+                    TextField("Path to claude", text: $config.baseURL, prompt: Text(detectedClaudePath))
+                        .onSubmit(refresh)
+                } else {
+                    TextField("Server", text: $config.baseURL, prompt: Text("https://…"))
+                        .onSubmit(refresh)
+                }
+            }
+            if config.kind == .claudeCode {
+                Text("""
+                    Runs your installed Claude Code with its tools, settings and MCP servers turned off. It uses your \
+                    own Claude login (run `claude` once in Terminal to sign in), so replies count against your plan's \
+                    usage limits. ItsMeAgain never sees your credentials. Anthropic's terms don't explicitly cover \
+                    using Claude Code this way; plan limits assume ordinary individual use.
+                    """)
+                .font(.callout)
+                .foregroundStyle(.secondary)
             }
             if config.needsAPIKey {
                 SecureField("API Key", text: $apiKey, prompt: Text(config.isLocal ? "Optional" : "Required"))
@@ -93,6 +109,10 @@ private struct ProviderSection: View {
         } else {
             Text("Not checked").foregroundStyle(.secondary)
         }
+    }
+
+    private var detectedClaudePath: String {
+        ClaudeCodeProvider.locate()?.path(percentEncoded: false) ?? "Not found – enter the path"
     }
 
     private func refresh() {

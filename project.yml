@@ -29,7 +29,9 @@ targets:
     entitlements:
       path: App/ItsMeAgain.entitlements
       properties:
-        com.apple.security.app-sandbox: true
+        # Off so the Claude Code provider can run the user's `claude` CLI (which needs ~/.claude and the
+        # login keychain). Data moves out of the container once on first launch (AppData).
+        com.apple.security.app-sandbox: false
         com.apple.security.network.client: true
         com.apple.security.files.user-selected.read-only: true
         com.apple.security.files.bookmarks.app-scope: true

@@ -6,7 +6,7 @@ import Providers
 /// A configured backend. Persisted (without secrets) in UserDefaults; API keys are in the Keychain.
 struct ProviderConfig: Codable, Identifiable, Hashable {
     enum Kind: String, Codable {
-        case ollama, anthropic, openAICompatible, appleIntelligence, appleTranslation
+        case ollama, anthropic, openAICompatible, appleIntelligence, appleTranslation, claudeCode
     }
 
     var id: ProviderID
@@ -21,7 +21,7 @@ struct ProviderConfig: Codable, Identifiable, Hashable {
     var isLocal: Bool {
         switch kind {
         case .ollama, .appleIntelligence, .appleTranslation: true
-        case .anthropic: false
+        case .anthropic, .claudeCode: false
         case .openAICompatible: ["localhost", "127.0.0.1"].contains(URL(string: baseURL)?.host())
         }
     }
@@ -32,6 +32,7 @@ struct ProviderConfig: Codable, Identifiable, Hashable {
         case .anthropic, .openAICompatible: isLocal ? "server.rack" : "cloud"
         case .appleIntelligence: "apple.intelligence"
         case .appleTranslation: "translate"
+        case .claudeCode: "terminal"
         }
     }
 
@@ -58,6 +59,13 @@ struct ProviderConfig: Codable, Identifiable, Hashable {
             return AppleOnDeviceProvider()
         case .appleTranslation:
             return AppleTranslationProvider()
+        case .claudeCode:
+            return ClaudeCodeProvider(
+                id: id,
+                displayName: name,
+                executable: ClaudeCodeProvider.locate(custom: baseURL),
+                workingDirectory: AppData.claudeCodeWorkdir
+            )
         }
     }
 
@@ -77,6 +85,7 @@ struct ProviderConfig: Codable, Identifiable, Hashable {
 
     static let presets: [Preset] = [
         Preset(name: "Anthropic (Claude)", kind: .anthropic, baseURL: AnthropicProvider.defaultBaseURL.absoluteString),
+        Preset(name: "Claude Code (your subscription)", kind: .claudeCode, baseURL: ""),
         Preset(name: "OpenAI (ChatGPT)", kind: .openAICompatible, baseURL: "https://api.openai.com/v1"),
         Preset(name: "OpenRouter", kind: .openAICompatible, baseURL: "https://openrouter.ai/api/v1"),
         Preset(name: "LM Studio", kind: .openAICompatible, baseURL: "http://localhost:1234/v1"),

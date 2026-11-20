@@ -57,8 +57,7 @@ final class KnowledgeModel {
         self.defaults = defaults
         sources = defaults.data(forKey: Keys.sources).flatMap { try? JSONDecoder().decode([KnowledgeSource].self, from: $0) } ?? []
         embeddingModel = defaults.string(forKey: Keys.embeddingModel) ?? "embeddinggemma"
-        let directory = URL.applicationSupportDirectory.appending(path: "Knowledge", directoryHint: .isDirectory)
-        store = KnowledgeStore(directory: directory)
+        store = KnowledgeStore(directory: AppData.knowledge)
         for source in sources { resolve(source) }
     }
 
@@ -144,12 +143,12 @@ final class KnowledgeModel {
 
     private func resolve(_ source: KnowledgeSource) {
         var stale = false
-        guard let url = try? URL(resolvingBookmarkData: source.bookmark, options: .withSecurityScope, bookmarkDataIsStale: &stale),
-            url.startAccessingSecurityScopedResource()
-        else {
+        // Outside the App Sandbox `startAccessingSecurityScopedResource()` may return false but access works anyway.
+        guard let url = try? URL(resolvingBookmarkData: source.bookmark, options: .withSecurityScope, bookmarkDataIsStale: &stale) else {
             update(source.id) { $0.lastError = "Folder not accessible; remove and add it again." }
             return
         }
+        _ = url.startAccessingSecurityScopedResource()
         accessedURLs[source.id] = url
         if stale, let fresh = try? url.bookmarkData(options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess]) {
             update(source.id) { $0.bookmark = fresh }
