@@ -16,7 +16,7 @@ struct MessageRow: View {
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(.tint.opacity(0.15), in: .rect(cornerRadius: 12))
+                    .background(Theme.raised, in: .rect(cornerRadius: 12))
             }
         default:
             VStack(alignment: .leading, spacing: 8) {
@@ -27,6 +27,10 @@ struct MessageRow: View {
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
+                }
+                let steps = message.toolSteps
+                if !steps.isEmpty {
+                    ToolStepsView(steps: steps)
                 }
                 if message.content.isEmpty && isStreaming {
                     ProgressView().controlSize(.small)
@@ -60,6 +64,13 @@ struct MarkdownView: View {
                 case .text(let text):
                     Text(Self.attributed(text))
                         .textSelection(.enabled)
+                case .heading(let level, let text):
+                    Text(Self.attributed(text))
+                        .font(level == 1 ? .title2.bold() : level == 2 ? .title3.bold() : .headline)
+                        .padding(.top, 4)
+                        .textSelection(.enabled)
+                case .rule:
+                    Divider()
                 case .code(let language, let code):
                     CodeBlock(language: language, code: code)
                 }
@@ -101,6 +112,7 @@ struct CodeBlock: View {
                     .padding(10)
             }
         }
-        .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 8))
+        .background(Theme.recessed, in: .rect(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border.opacity(0.6)))
     }
 }

@@ -24,19 +24,24 @@ public struct ChatMessage: Codable, Sendable, Hashable {
     /// For `.tool` messages: the call this message answers.
     public var toolCallID: String?
     public var toolName: String?
+    /// The provider's raw assistant content (e.g. Claude's signed thinking blocks), replayed verbatim
+    /// by that provider inside a tool loop. Never persisted across turns.
+    public var providerContent: JSONValue?
 
     public init(
         role: Role,
         content: String,
         toolCalls: [ToolCall] = [],
         toolCallID: String? = nil,
-        toolName: String? = nil
+        toolName: String? = nil,
+        providerContent: JSONValue? = nil
     ) {
         self.role = role
         self.content = content
         self.toolCalls = toolCalls
         self.toolCallID = toolCallID
         self.toolName = toolName
+        self.providerContent = providerContent
     }
 
     public static func system(_ content: String) -> ChatMessage { .init(role: .system, content: content) }
@@ -125,5 +130,7 @@ public enum ChatEvent: Sendable, Hashable {
     case textDelta(String)
     case thinkingDelta(String)
     case toolCall(ToolCall)
+    /// The complete assistant message in the provider's own format, for `ChatMessage.providerContent`.
+    case assistantContent(JSONValue)
     case done(Usage?)
 }

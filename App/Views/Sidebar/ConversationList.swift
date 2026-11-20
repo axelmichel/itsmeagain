@@ -30,6 +30,8 @@ struct ConversationList: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.sidebar)
         .searchable(text: $search, placement: .sidebar)
         .onDeleteCommand {
             if let selection { delete(selection) }
@@ -37,7 +39,7 @@ struct ConversationList: View {
     }
 
     private func delete(_ conversation: Conversation) {
-        app.chat.stop(conversation)
+        app.chat.discard(conversation)
         if selection == conversation { selection = nil }
         context.delete(conversation)
         try? context.save()

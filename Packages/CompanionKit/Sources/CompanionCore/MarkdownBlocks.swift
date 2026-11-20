@@ -4,6 +4,8 @@ import Foundation
 /// Tolerates an unclosed fence (common mid-stream) by treating the rest as code.
 public enum MarkdownBlock: Sendable, Hashable {
     case text(String)
+    case heading(level: Int, text: String)
+    case rule
     case code(language: String?, code: String)
 
     public static func parse(_ markdown: String) -> [MarkdownBlock] {
@@ -30,6 +32,12 @@ public enum MarkdownBlock: Sendable, Hashable {
                 } else {
                     buffer.append(line)
                 }
+            } else if let heading = Self.heading(trimmed) {
+                flush()
+                blocks.append(heading)
+            } else if trimmed.count >= 3, Set(trimmed).count == 1, "-*_".contains(trimmed.first!) {
+                flush()
+                blocks.append(.rule)
             } else if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
                 flush()
                 let character = trimmed.first!
@@ -42,5 +50,14 @@ public enum MarkdownBlock: Sendable, Hashable {
         }
         flush()
         return blocks
+    }
+
+    /// ATX headings: one to six `#` followed by a space.
+    private static func heading(_ line: String) -> MarkdownBlock? {
+        let level = line.prefix(while: { $0 == "#" }).count
+        guard (1...6).contains(level), line.dropFirst(level).first == " " else { return nil }
+        let text = line.dropFirst(level).trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "#")).trimmingCharacters(in: .whitespaces)
+        return .heading(level: level, text: text)
     }
 }

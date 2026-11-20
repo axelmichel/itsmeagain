@@ -1,11 +1,13 @@
 import AppleIntelligence
 import CompanionCore
 import Foundation
+import Knowledge
 import Observation
 import Persistence
 import Providers
 import Routing
 import SwiftData
+import Tools
 
 /// App-wide state: configured providers, task → model mapping, routing, and the chat engine.
 @MainActor
@@ -20,6 +22,8 @@ final class AppModel {
         static let routerProvider = "routerProvider"
         static let routerModel = "routerModel"
         static let preferAppleRouter = "preferAppleRouter"
+        static let searchBackend = "searchBackend"
+        static let searxngURL = "searxngURL"
         static let legacyOllamaHost = "ollamaHost"
     }
 
@@ -58,11 +62,20 @@ final class AppModel {
         didSet { defaults.set(preferAppleRouter, forKey: Keys.preferAppleRouter) }
     }
 
+    var searchBackend: SearchBackendKind {
+        didSet { defaults.set(searchBackend.rawValue, forKey: Keys.searchBackend) }
+    }
+
+    var searxngURL: String {
+        didSet { defaults.set(searxngURL, forKey: Keys.searxngURL) }
+    }
+
     private(set) var models: [ProviderID: [ModelInfo]] = [:]
     private(set) var modelErrors: [ProviderID: String] = [:]
     private(set) var isLoadingModels = false
 
     let chat = ChatController()
+    let knowledge: KnowledgeModel
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -88,6 +101,15 @@ final class AppModel {
             model: defaults.string(forKey: Keys.routerModel) ?? "qwen3:8b"
         )
         preferAppleRouter = defaults.object(forKey: Keys.preferAppleRouter) as? Bool ?? true
+        searchBackend = defaults.string(forKey: Keys.searchBackend).flatMap(SearchBackendKind.init(rawValue:)) ?? .wikipedia
+        searxngURL = defaults.string(forKey: Keys.searxngURL) ?? "http://localhost:8888"
+        knowledge = KnowledgeModel(defaults: defaults)
+        knowledge.ollama = { [weak self] in self?.ollamaProvider ?? OllamaProvider() }
+    }
+
+    /// The configured Ollama server, also used for embeddings and model downloads.
+    var ollamaProvider: OllamaProvider {
+        (config(for: .ollama)?.makeProvider() as? OllamaProvider) ?? OllamaProvider()
     }
 
     // MARK: Providers
@@ -173,6 +195,32 @@ final class AppModel {
         return TaskRouter(classifier: nil)
     }
 
+    // MARK: Tools
+
+    func makeSearchBackend() -> any SearchBackend {
+        switch searchBackend {
+        case .wikipedia:
+            return WikipediaSearchBackend()
+        case .searxng:
+            return SearXNGBackend(baseURL: URL(string: searxngURL) ?? URL(string: "http://localhost:8888")!)
+        case .brave:
+            return BraveSearchBackend(apiKey: KeychainStore.key(for: SearchBackendKind.brave.keychainAccount) ?? "")
+        case .ollama:
+            return OllamaWebSearchBackend(apiKey: KeychainStore.key(for: SearchBackendKind.ollama.keychainAccount) ?? "")
+        }
+    }
+
+    func makeTools(for profile: TaskProfile) -> [any Tool] {
+        profile.tools.compactMap { name -> (any Tool)? in
+            switch name {
+            case TaskProfile.ToolName.webSearch: WebSearchTool(backend: makeSearchBackend())
+            case TaskProfile.ToolName.fetchPage: FetchPageTool()
+            case TaskProfile.ToolName.searchDocuments: knowledge.makeTool()
+            default: nil
+            }
+        }
+    }
+
     // MARK: Conversations
 
     /// What the next turn of `conversation` will use (for Auto: the last routed task's mapping).
@@ -219,12 +267,32 @@ final class AppModel {
             guard let provider = provider(for: ref.provider) else {
                 throw ProviderError.unavailable("\(displayName(for: ref.provider)) is disabled or not configured (Settings → Providers).")
             }
+            let profile = taskProfiles[conversation.task]
             return TurnPlan(
                 provider: provider,
-                profile: taskProfiles[conversation.task],
+                profile: profile,
                 model: ref.model,
-                targetLanguage: targetLanguage
+                targetLanguage: targetLanguage,
+                tools: makeTools(for: profile)
             )
         }
     }
+}
+
+enum SearchBackendKind: String, CaseIterable, Identifiable {
+    case wikipedia, searxng, brave, ollama
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .wikipedia: "Wikipedia (no setup)"
+        case .searxng: "SearXNG (self-hosted)"
+        case .brave: "Brave Search API"
+        case .ollama: "Ollama Web Search"
+        }
+    }
+
+    var keychainAccount: String { "search.\(rawValue)" }
+    var needsAPIKey: Bool { self == .brave || self == .ollama }
 }

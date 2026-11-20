@@ -29,6 +29,14 @@ public enum TaskKind: String, CaseIterable, Codable, Sendable, Identifiable {
 /// The user's mapping of one task to a provider/model plus how to prompt it.
 public struct TaskProfile: Codable, Sendable, Hashable, Identifiable {
     public static let targetLanguagePlaceholder = "{{target_language}}"
+    public static let datePlaceholder = "{{date}}"
+
+    /// Tool names (see `ToolCatalog`) offered to the model for this task.
+    public enum ToolName {
+        public static let webSearch = "web_search"
+        public static let fetchPage = "fetch_page"
+        public static let searchDocuments = "search_documents"
+    }
 
     public var task: TaskKind
     public var providerID: ProviderID
@@ -39,6 +47,7 @@ public struct TaskProfile: Codable, Sendable, Hashable, Identifiable {
     public var think: Bool?
     /// When false only the latest user message is sent (translation works per message).
     public var includesHistory: Bool
+    public var tools: [String]
 
     public var id: TaskKind { task }
 
@@ -50,7 +59,8 @@ public struct TaskProfile: Codable, Sendable, Hashable, Identifiable {
         temperature: Double? = nil,
         contextLength: Int? = nil,
         think: Bool? = nil,
-        includesHistory: Bool = true
+        includesHistory: Bool = true,
+        tools: [String] = []
     ) {
         self.task = task
         self.providerID = providerID
@@ -60,6 +70,23 @@ public struct TaskProfile: Codable, Sendable, Hashable, Identifiable {
         self.contextLength = contextLength
         self.think = think
         self.includesHistory = includesHistory
+        self.tools = tools
+    }
+
+    /// Fields added in later versions fall back to the task's defaults, so saved settings survive upgrades.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let task = try container.decode(TaskKind.self, forKey: .task)
+        self.task = task
+        let fallback = TaskProfiles.defaultProfiles.first { $0.task == task }!
+        providerID = try container.decodeIfPresent(ProviderID.self, forKey: .providerID) ?? fallback.providerID
+        modelID = try container.decodeIfPresent(String.self, forKey: .modelID) ?? fallback.modelID
+        systemPrompt = try container.decodeIfPresent(String.self, forKey: .systemPrompt) ?? fallback.systemPrompt
+        temperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
+        contextLength = try container.decodeIfPresent(Int.self, forKey: .contextLength)
+        think = try container.decodeIfPresent(Bool.self, forKey: .think)
+        includesHistory = try container.decodeIfPresent(Bool.self, forKey: .includesHistory) ?? fallback.includesHistory
+        tools = try container.decodeIfPresent([String].self, forKey: .tools) ?? fallback.tools
     }
 
     public func makeRequest(
@@ -74,6 +101,7 @@ public struct TaskProfile: Codable, Sendable, Hashable, Identifiable {
         }
         let system = systemPrompt
             .replacingOccurrences(of: Self.targetLanguagePlaceholder, with: targetLanguage)
+            .replacingOccurrences(of: Self.datePlaceholder, with: Date.now.formatted(date: .complete, time: .omitted))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return ChatRequest(
             model: model ?? modelID,
@@ -147,10 +175,19 @@ public struct TaskProfiles: Codable, Sendable, Hashable {
             task: .research,
             modelID: "qwen3:30b-a3b",
             systemPrompt: """
-                You are a careful research assistant. Break questions down, separate facts from assumptions \
-                and say clearly when you are unsure. Structure longer answers with headings and bullet points.
+                You are a careful research assistant. Today is \(TaskProfile.datePlaceholder).
+                If the question may concern the user's own notes or files, use search_documents first.
+                When the question needs facts, current information or comparisons, use web_search, then open \
+                the 2–4 most relevant results with fetch_page; snippets alone are not enough. If a search \
+                returns nothing useful, try different, shorter keywords instead of repeating it.
+                Separate facts from assumptions and say clearly when sources disagree or you are unsure. \
+                If the tools didn't provide the answer, say so and mark anything from general knowledge as such.
+                Cite sources inline as [1], [2], … and end with a "Sources" list in the same numbering. \
+                Only cite URLs that appeared in tool results; never invent a source. \
+                Structure longer answers with headings and bullet points.
                 """,
-            contextLength: 16_384
+            contextLength: 32_768,
+            tools: [TaskProfile.ToolName.webSearch, TaskProfile.ToolName.fetchPage, TaskProfile.ToolName.searchDocuments]
         ),
         TaskProfile(
             task: .code,

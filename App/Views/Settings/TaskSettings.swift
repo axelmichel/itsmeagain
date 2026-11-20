@@ -78,6 +78,17 @@ struct TaskSettings: View {
                 }
 
                 Section {
+                    toolToggle("Web Search", name: TaskProfile.ToolName.webSearch, profile: profile)
+                    toolToggle("Read Web Pages", name: TaskProfile.ToolName.fetchPage, profile: profile)
+                    toolToggle("Search My Documents", name: TaskProfile.ToolName.searchDocuments, profile: profile)
+                } header: {
+                    Text("Tools")
+                } footer: {
+                    Text("The model decides when to use enabled tools. Needs a model with tool support (e.g. Qwen 3, Claude, GPT).")
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
                     TextEditor(text: profile.systemPrompt)
                         .font(.body.monospaced())
                         .frame(minHeight: 110)
@@ -100,6 +111,16 @@ struct TaskSettings: View {
             .formStyle(.grouped)
         }
         .frame(height: 620)
+    }
+
+    private func toolToggle(_ title: String, name: String, profile: Binding<TaskProfile>) -> some View {
+        Toggle(title, isOn: Binding(
+            get: { profile.wrappedValue.tools.contains(name) },
+            set: { enabled in
+                profile.wrappedValue.tools.removeAll { $0 == name }
+                if enabled { profile.wrappedValue.tools.append(name) }
+            }
+        ))
     }
 
     private func providerNote(for profile: TaskProfile) -> String? {

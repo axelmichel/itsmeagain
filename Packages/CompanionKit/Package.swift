@@ -10,16 +10,23 @@ let package = Package(
         .library(name: "Persistence", targets: ["Persistence"]),
         .library(name: "Routing", targets: ["Routing"]),
         .library(name: "AppleIntelligence", targets: ["AppleIntelligence"]),
+        .library(name: "Tools", targets: ["Tools"]),
+        .library(name: "Knowledge", targets: ["Knowledge"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.14.0"),
     ],
     targets: [
         .target(name: "CompanionCore"),
         .target(name: "Providers", dependencies: ["CompanionCore"]),
         .target(name: "Routing", dependencies: ["CompanionCore"]),
         .target(name: "AppleIntelligence", dependencies: ["CompanionCore", "Routing"]),
-        .target(name: "Persistence", dependencies: ["CompanionCore", "Routing"]),
+        .target(name: "Tools", dependencies: ["CompanionCore", "SwiftSoup"]),
+        .target(name: "Knowledge", dependencies: ["CompanionCore", "Tools"]),
+        .target(name: "Persistence", dependencies: ["CompanionCore", "Routing", "Tools"]),
         .testTarget(
             name: "CompanionKitTests",
-            dependencies: ["CompanionCore", "Providers", "Persistence", "Routing", "AppleIntelligence"]
+            dependencies: ["CompanionCore", "Providers", "Persistence", "Routing", "AppleIntelligence", "Tools", "Knowledge"]
         ),
     ]
 )

@@ -33,4 +33,16 @@ import Testing
         #expect(MarkdownBlock.parse("a\n\nb") == [.text("a\n\nb")])
         #expect(MarkdownBlock.parse("") == [])
     }
+
+    @Test func headingsAndRules() {
+        let markdown = "# Title\nIntro\n## Part 2 ##\n---\n#hashtag stays text\n```\n# not a heading\n```"
+        #expect(MarkdownBlock.parse(markdown) == [
+            .heading(level: 1, text: "Title"),
+            .text("Intro"),
+            .heading(level: 2, text: "Part 2"),
+            .rule,
+            .text("#hashtag stays text"),
+            .code(language: nil, code: "# not a heading"),
+        ])
+    }
 }

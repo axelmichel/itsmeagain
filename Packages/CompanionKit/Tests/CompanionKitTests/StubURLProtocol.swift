@@ -15,7 +15,8 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
 
     /// Registers a handler on a fresh host and returns a session plus the base URL to use.
     static func make(_ handler: @escaping Handler) -> (URLSession, URL) {
-        let host = "stub-\(UUID().uuidString.lowercased())"
+        // Dotted, public-looking name so URL policies (e.g. fetch_page's private-host check) accept it.
+        let host = "\(UUID().uuidString.lowercased()).stub.example"
         handlers.withLock { $0[host] = handler }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]

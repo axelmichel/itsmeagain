@@ -4,6 +4,7 @@ import Testing
 
 @testable import Providers
 import Routing
+import Tools
 
 /// Hits a real local Ollama. Run with `OLLAMA_LIVE=1 swift test --filter OllamaLiveTests`.
 /// Override the model with `OLLAMA_LIVE_MODEL` (default `qwen3:8b`).
@@ -51,5 +52,34 @@ struct OllamaLiveTests {
     func classifiesWithLocalModel(text: String, expected: TaskKind) async throws {
         let classifier = LLMTaskClassifier(provider: provider, model: model)
         #expect(try await classifier.classify(text) == expected)
+    }
+
+    /// Full research turn: real model, real Wikipedia search, real page fetches.
+    @Test func researchesWithWebTools() async throws {
+        let researchModel = ProcessInfo.processInfo.environment["OLLAMA_LIVE_RESEARCH_MODEL"] ?? "qwen3:30b-a3b"
+        let request = TaskProfiles.defaults[.research].makeRequest(
+            history: [.user("In which year was the Swift programming language first released, and who started it?")],
+            model: researchModel
+        )
+        // SEARXNG_URL switches from the keyless Wikipedia backend to a SearXNG instance.
+        let backend: any SearchBackend = ProcessInfo.processInfo.environment["SEARXNG_URL"]
+            .flatMap(URL.init(string:)).map { SearXNGBackend(baseURL: $0) } ?? WikipediaSearchBackend()
+        let loop = ToolLoop(provider: provider, tools: [WebSearchTool(backend: backend), FetchPageTool()])
+
+        var answer = ""
+        var toolsUsed: [String] = []
+        var failures: [String] = []
+        for try await event in loop.run(request) {
+            switch event {
+            case .text(let delta): answer += delta
+            case .toolStarted(let call): toolsUsed.append("\(call.name)(\(call.arguments.jsonString))")
+            case .toolFinished(_, _, let error?): failures.append(error)
+            default: break
+            }
+        }
+        print("TOOLS:", toolsUsed, "FAILURES:", failures, "\nANSWER:", answer)
+        #expect(toolsUsed.contains { $0.hasPrefix("web_search") })
+        #expect(answer.contains("2014"))
+        #expect(answer.contains("Lattner"))
     }
 }

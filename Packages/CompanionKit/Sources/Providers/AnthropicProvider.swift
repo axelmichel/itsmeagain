@@ -109,9 +109,11 @@ public struct AnthropicProvider: LLMProvider {
 // MARK: - Streaming
 
 extension AnthropicProvider {
-    /// Turns SSE `data:` payloads into `ChatEvent`s, assembling streamed tool inputs.
+    /// Turns SSE `data:` payloads into `ChatEvent`s and reassembles the full content blocks
+    /// (signed thinking, text, tool_use), which a tool loop must send back unchanged.
     struct StreamParser {
-        private var toolBlocks: [Int: (id: String, name: String, json: String)] = [:]
+        private var blocks: [Int: [String: JSONValue]] = [:]
+        private var toolJSON: [Int: String] = [:]
         private var usage = Usage()
         private(set) var finished = false
 
@@ -123,29 +125,32 @@ extension AnthropicProvider {
             case "message_start":
                 usage.promptTokens = event["message"]?["usage"]?["input_tokens"]?.intValue
             case "content_block_start":
-                let block = event["content_block"]
-                if block?["type"]?.stringValue == "tool_use" {
-                    toolBlocks[index] = (block?["id"]?.stringValue ?? UUID().uuidString, block?["name"]?.stringValue ?? "", "")
-                }
+                if case .object(let block)? = event["content_block"] { blocks[index] = block }
             case "content_block_delta":
                 let delta = event["delta"]
                 switch delta?["type"]?.stringValue {
                 case "text_delta":
-                    if let text = delta?["text"]?.stringValue, !text.isEmpty { return [.textDelta(text)] }
+                    let text = delta?["text"]?.stringValue ?? ""
+                    append(text, to: "text", in: index)
+                    if !text.isEmpty { return [.textDelta(text)] }
                 case "thinking_delta":
-                    if let thinking = delta?["thinking"]?.stringValue, !thinking.isEmpty { return [.thinkingDelta(thinking)] }
+                    let thinking = delta?["thinking"]?.stringValue ?? ""
+                    append(thinking, to: "thinking", in: index)
+                    if !thinking.isEmpty { return [.thinkingDelta(thinking)] }
+                case "signature_delta":
+                    append(delta?["signature"]?.stringValue ?? "", to: "signature", in: index)
                 case "input_json_delta":
-                    toolBlocks[index]?.json += delta?["partial_json"]?.stringValue ?? ""
+                    toolJSON[index, default: ""] += delta?["partial_json"]?.stringValue ?? ""
                 default:
-                    break  // signature_delta and future delta types
+                    break
                 }
             case "content_block_stop":
-                if let tool = toolBlocks.removeValue(forKey: index) {
-                    let json = tool.json.isEmpty ? "{}" : tool.json
-                    guard let arguments = try? JSONDecoder().decode(JSONValue.self, from: Data(json.utf8)) else {
-                        throw ProviderError.invalidResponse("tool input for \(tool.name) is not valid JSON")
+                if blocks[index]?["type"]?.stringValue == "tool_use" {
+                    let json = toolJSON.removeValue(forKey: index).flatMap { $0.isEmpty ? nil : $0 } ?? "{}"
+                    guard let input = try? JSONDecoder().decode(JSONValue.self, from: Data(json.utf8)) else {
+                        throw ProviderError.invalidResponse("tool input for \(blocks[index]?["name"]?.stringValue ?? "?") is not valid JSON")
                     }
-                    return [.toolCall(ToolCall(id: tool.id, name: tool.name, arguments: arguments))]
+                    blocks[index]?["input"] = input
                 }
             case "message_delta":
                 if let output = event["usage"]?["output_tokens"]?.intValue { usage.completionTokens = output }
@@ -155,13 +160,38 @@ extension AnthropicProvider {
                 }
             case "message_stop":
                 finished = true
-                return [.done(usage)]
+                let content = Self.echoable(blocks.keys.sorted().compactMap { blocks[$0] })
+                let calls: [ChatEvent] = content.compactMap { block in
+                    guard block["type"]?.stringValue == "tool_use" else { return nil }
+                    return .toolCall(ToolCall(
+                        id: block["id"]?.stringValue ?? UUID().uuidString,
+                        name: block["name"]?.stringValue ?? "",
+                        arguments: block["input"] ?? [:]
+                    ))
+                }
+                return calls + [.assistantContent(.array(content.map(JSONValue.object))), .done(usage)]
             case "error":
                 throw ProviderError.server(event["error"]?["message"]?.stringValue ?? "Anthropic stream error")
             default:
                 break  // ping and future event types
             }
             return []
+        }
+
+        private mutating func append(_ text: String, to key: String, in index: Int) {
+            guard var block = blocks[index] else { return }
+            block[key] = .string((block[key]?.stringValue ?? "") + text)
+            blocks[index] = block
+        }
+
+        /// After a mid-output refusal fallback, blocks before the last `fallback` marker that belong to
+        /// the declined model (thinking, tool calls) must not be echoed; text stays.
+        static func echoable(_ blocks: [[String: JSONValue]]) -> [[String: JSONValue]] {
+            guard let boundary = blocks.lastIndex(where: { $0["type"]?.stringValue == "fallback" }) else { return blocks }
+            let dropped: Set<String> = ["thinking", "redacted_thinking", "tool_use", "server_tool_use"]
+            return blocks.enumerated().compactMap { offset, block in
+                offset < boundary && dropped.contains(block["type"]?.stringValue ?? "") ? nil : block
+            }
         }
     }
 }
@@ -229,7 +259,9 @@ extension AnthropicProvider {
                     ])
                 case .assistant:
                     flushResults()
-                    if message.toolCalls.isEmpty {
+                    if let content = message.providerContent {
+                        result.append(["role": "assistant", "content": content])
+                    } else if message.toolCalls.isEmpty {
                         guard !message.content.isEmpty else { continue }
                         result.append(["role": "assistant", "content": .string(message.content)])
                     } else {

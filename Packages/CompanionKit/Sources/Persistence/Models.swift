@@ -2,6 +2,7 @@ import CompanionCore
 import Foundation
 import Routing
 import SwiftData
+import Tools
 
 @Model
 public final class Conversation {
@@ -69,6 +70,8 @@ public final class StoredMessage {
     public var modelID: String?
     public var taskRaw: String?
     public var errorText: String?
+    /// JSON-encoded `[ToolStep]` (kept as Data to stay a plain attribute in SwiftData).
+    public var toolStepsData: Data?
     public var conversation: Conversation?
 
     public init(role: Role, content: String, order: Int, modelID: String? = nil, task: TaskKind? = nil) {
@@ -84,6 +87,33 @@ public final class StoredMessage {
 
     public var role: Role { Role(rawValue: roleRaw) ?? .user }
     public var task: TaskKind? { taskRaw.flatMap(TaskKind.init(rawValue:)) }
+
+    public var toolSteps: [ToolStep] {
+        get { toolStepsData.flatMap { try? JSONDecoder().decode([ToolStep].self, from: $0) } ?? [] }
+        set { toolStepsData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
+    }
+}
+
+/// One tool call shown in the transcript ("Searched …", "Read …").
+public struct ToolStep: Codable, Sendable, Hashable, Identifiable {
+    public enum Status: String, Codable, Sendable { case running, done, failed }
+
+    public var id: String
+    public var tool: String
+    /// The query or URL, for display.
+    public var subject: String
+    public var status: Status
+    public var error: String?
+    public var sources: [SourceRef]
+
+    public init(id: String, tool: String, subject: String, status: Status = .running, error: String? = nil, sources: [SourceRef] = []) {
+        self.id = id
+        self.tool = tool
+        self.subject = subject
+        self.status = status
+        self.error = error
+        self.sources = sources
+    }
 }
 
 public enum CompanionSchema {

@@ -114,6 +114,60 @@ public struct OllamaProvider: LLMProvider, Embedder {
         return try JSONDecoder().decode(EmbedResponse.self, from: data).embeddings
     }
 
+    // MARK: Downloads
+
+    public struct PullProgress: Sendable, Equatable {
+        public var status: String
+        public var completed: Int64?
+        public var total: Int64?
+
+        public init(status: String, completed: Int64? = nil, total: Int64? = nil) {
+            self.status = status
+            self.completed = completed
+            self.total = total
+        }
+
+        public var fraction: Double? {
+            guard let completed, let total, total > 0 else { return nil }
+            return Double(completed) / Double(total)
+        }
+    }
+
+    /// Downloads a model (`/api/pull`), reporting Ollama's progress lines.
+    public func pull(_ model: String) -> AsyncThrowingStream<PullProgress, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    var request = URLRequest(url: baseURL.appending(path: "api/pull"))
+                    request.httpMethod = "POST"
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.httpBody = try JSONEncoder().encode(["model": JSONValue.string(model), "stream": true])
+                    let bytes: URLSession.AsyncBytes
+                    let response: URLResponse
+                    do {
+                        (bytes, response) = try await session.bytes(for: request)
+                    } catch {
+                        throw HTTP.mapConnectionError(error, service: "Ollama", url: baseURL)
+                    }
+                    try await HTTP.validate(response, bytes: bytes)
+                    for try await line in bytes.lines where !line.isEmpty {
+                        let event = try JSONDecoder().decode(JSONValue.self, from: Data(line.utf8))
+                        if let error = event["error"]?.stringValue { throw ProviderError.server(error) }
+                        continuation.yield(PullProgress(
+                            status: event["status"]?.stringValue ?? "",
+                            completed: event["completed"]?.intValue.map(Int64.init),
+                            total: event["total"]?.intValue.map(Int64.init)
+                        ))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     private func load(_ request: URLRequest) async throws -> (Data, URLResponse) {
         do {
             return try await session.data(for: request)

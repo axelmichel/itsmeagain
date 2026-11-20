@@ -15,6 +15,9 @@ struct SettingsView: View {
             Tab("Tasks", systemImage: "square.stack.3d.up") {
                 TaskSettings()
             }
+            Tab("Knowledge", systemImage: "books.vertical") {
+                KnowledgeSettings()
+            }
         }
         .frame(width: 620)
         .task { await app.refreshModels() }
@@ -46,8 +49,58 @@ private struct GeneralSettings: View {
                     """)
                 .foregroundStyle(.secondary)
             }
+
+            WebSearchSection()
         }
         .formStyle(.grouped)
-        .frame(height: 360)
+        .frame(height: 560)
+    }
+}
+
+private struct WebSearchSection: View {
+    @Environment(AppModel.self) private var app
+    @State private var apiKey = ""
+    @State private var loadedFor: SearchBackendKind?
+
+    var body: some View {
+        @Bindable var app = app
+        Section {
+            Picker("Search With", selection: $app.searchBackend) {
+                ForEach(SearchBackendKind.allCases) { Text($0.title).tag($0) }
+            }
+            switch app.searchBackend {
+            case .searxng:
+                TextField("SearXNG URL", text: $app.searxngURL, prompt: Text("http://localhost:8888"))
+            case .brave, .ollama:
+                SecureField("API Key", text: $apiKey)
+                    .onChange(of: apiKey) { _, key in
+                        if loadedFor == app.searchBackend { KeychainStore.setKey(key, for: app.searchBackend.keychainAccount) }
+                    }
+            case .wikipedia:
+                EmptyView()
+            }
+        } header: {
+            Text("Web Search")
+        } footer: {
+            Text(footer).foregroundStyle(.secondary)
+        }
+        .onChange(of: app.searchBackend, initial: true) { _, backend in
+            loadedFor = nil
+            apiKey = backend.needsAPIKey ? KeychainStore.key(for: backend.keychainAccount) ?? "" : ""
+            loadedFor = backend
+        }
+    }
+
+    private var footer: String {
+        switch app.searchBackend {
+        case .wikipedia:
+            "Works without setup but only searches Wikipedia, which is weak for news, products and ambiguous names. Use SearXNG or an API for real web search."
+        case .searxng:
+            "Local metasearch engine, e.g. via Docker. Its settings.yml must allow the json format."
+        case .brave:
+            "Get a key at brave.com/search/api (free tier available). Stored in the Keychain."
+        case .ollama:
+            "Uses an ollama.com API key. Stored in the Keychain."
+        }
     }
 }

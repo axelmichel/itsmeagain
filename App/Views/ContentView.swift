@@ -23,6 +23,8 @@ struct ContentView: View {
                 } actions: {
                     Button("New Chat", action: newConversation)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Theme.canvas)
             }
         }
         .toolbar {

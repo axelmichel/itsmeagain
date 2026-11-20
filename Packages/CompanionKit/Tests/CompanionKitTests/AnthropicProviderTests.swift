@@ -41,6 +41,11 @@ import Testing
             .thinkingDelta("Let me see"),
             .textDelta("Checking."),
             .toolCall(ToolCall(id: "toolu_1", name: "web_search", arguments: ["query": "swift"])),
+            .assistantContent([
+                ["type": "thinking", "thinking": "Let me see", "signature": "abc"],
+                ["type": "text", "text": "Checking."],
+                ["type": "tool_use", "id": "toolu_1", "name": "web_search", "input": ["query": "swift"]],
+            ]),
             .done(Usage(promptTokens: 21, completionTokens: 40)),
         ])
     }
@@ -149,5 +154,27 @@ import Testing
         let models = try await AnthropicProvider(apiKey: "k", baseURL: url, session: session).listModels()
         #expect(models.map(\.id) == ["claude-opus-5-5", "claude-haiku-5-5"])
         #expect(models[0].displayName == "Claude Opus 5.5")
+    }
+
+    @Test func replaysProviderContentVerbatim() {
+        let raw: JSONValue = [["type": "thinking", "thinking": "t", "signature": "sig"], ["type": "tool_use", "id": "x", "name": "n", "input": [:]]]
+        let messages = AnthropicProvider.MessagesBody.messages([
+            .user("q"),
+            ChatMessage(role: .assistant, content: "", toolCalls: [ToolCall(id: "x", name: "n", arguments: [:])], providerContent: raw),
+            ChatMessage(role: .tool, content: "r", toolCallID: "x"),
+        ])
+        #expect(messages[1] == ["role": "assistant", "content": raw])
+    }
+
+    @Test func dropsDeclinedModelBlocksBeforeFallbackMarker() {
+        let blocks: [[String: JSONValue]] = [
+            ["type": "thinking", "thinking": "a"],
+            ["type": "text", "text": "partial"],
+            ["type": "tool_use", "id": "1"],
+            ["type": "fallback"],
+            ["type": "thinking", "thinking": "b"],
+            ["type": "text", "text": "rest"],
+        ]
+        #expect(AnthropicProvider.StreamParser.echoable(blocks).map { $0["type"]?.stringValue } == ["text", "fallback", "thinking", "text"])
     }
 }
