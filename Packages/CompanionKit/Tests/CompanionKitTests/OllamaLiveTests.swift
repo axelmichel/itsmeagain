@@ -5,6 +5,7 @@ import Testing
 @testable import Providers
 import Routing
 import Tools
+@testable import Knowledge
 
 /// Hits a real local Ollama. Run with `OLLAMA_LIVE=1 swift test --filter OllamaLiveTests`.
 /// Override the model with `OLLAMA_LIVE_MODEL` (default `qwen3:8b`).
@@ -81,5 +82,29 @@ struct OllamaLiveTests {
         #expect(toolsUsed.contains { $0.hasPrefix("web_search") })
         #expect(answer.contains("2014"))
         #expect(answer.contains("Lattner"))
+    }
+
+    /// Real embeddings: index a temporary folder and retrieve across languages.
+    @Test func indexesAndSearchesDocumentsWithEmbeddingModel() async throws {
+        let embeddingModel = ProcessInfo.processInfo.environment["OLLAMA_LIVE_EMBED_MODEL"] ?? "embeddinggemma"
+        let root = FileManager.default.temporaryDirectory.appending(path: "itsmeagain-live-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "Unser WLAN-Passwort für Gäste steht auf der Rückseite des Routers im Flur.".write(to: root.appending(path: "haushalt.md"), atomically: true, encoding: .utf8)
+        try "Quarterly planning: the Q3 roadmap focuses on offline sync and the new onboarding flow.".write(to: root.appending(path: "work.txt"), atomically: true, encoding: .utf8)
+        try "Sourdough: feed the starter 12 hours before baking, 75% hydration, bake at 250°C.".write(to: root.appending(path: "bread.md"), atomically: true, encoding: .utf8)
+
+        let embedder = OllamaProvider(embeddingModel: embeddingModel)
+        let store = KnowledgeStore(directory: nil)
+        let summary = try await DocumentIndexer(store: store, embedder: embedder, embeddingModel: embeddingModel)
+            .index(source: UUID(), root: root)
+        #expect(summary.indexed == 3 && summary.failures.isEmpty)
+
+        let tool = SearchDocumentsTool(store: store, embedder: embedder, embeddingModel: embeddingModel, collections: ["Test"])
+        let wifi = try await tool.run(["query": "Where can guests find the wifi password?"])
+        let bread = try await tool.run(["query": "Wie lange vorher muss ich den Sauerteig füttern?"])
+        print("WIFI TOP:", wifi.sources.first?.url ?? "-", "\nBREAD TOP:", bread.sources.first?.url ?? "-")
+        #expect(wifi.sources.first?.url.hasSuffix("haushalt.md") == true, "English query finds the German note")
+        #expect(bread.sources.first?.url.hasSuffix("bread.md") == true, "German query finds the English note")
     }
 }

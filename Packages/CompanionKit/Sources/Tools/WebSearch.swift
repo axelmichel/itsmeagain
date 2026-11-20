@@ -21,10 +21,13 @@ extension SearchBackend {
 
 public struct WebSearchTool: Tool {
     public let backend: any SearchBackend
+    /// Used when `backend` fails (e.g. a self-hosted instance that is offline).
+    public let fallback: (any SearchBackend)?
     public let maxResults: Int
 
-    public init(backend: any SearchBackend, maxResults: Int = 6) {
+    public init(backend: any SearchBackend, fallback: (any SearchBackend)? = nil, maxResults: Int = 6) {
         self.backend = backend
+        self.fallback = fallback
         self.maxResults = maxResults
     }
 
@@ -33,7 +36,7 @@ public struct WebSearchTool: Tool {
             name: "web_search",
             description: """
                 Search the web (\(backend.name)). Returns titles, URLs and snippets. Use it for facts, \
-                current information and comparisons, then read the most relevant results with fetch_page.\(backend.queryHint.isEmpty ? "" : " " + backend.queryHint)
+                current information and comparisons, then read the most relevant results with fetch_page.\(backend.queryHint.isEmpty ? "" : " " + backend.queryHint)\(fallback.map { " If \(backend.name) is unavailable, \($0.name) is searched instead." } ?? "")
                 """,
             parameters: [
                 "type": "object",
@@ -45,13 +48,21 @@ public struct WebSearchTool: Tool {
 
     public func run(_ arguments: JSONValue) async throws -> ToolOutput {
         let query = try arguments.requiredString("query")
-        let results = try await backend.search(query, count: maxResults)
-        guard !results.isEmpty else { return ToolOutput(content: "No results for “\(query)”.") }
+        var note = ""
+        let results: [SearchResult]
+        do {
+            results = try await backend.search(query, count: maxResults)
+        } catch {
+            guard let fallback, !(error is CancellationError) else { throw error }
+            note = "Note: \(backend.name) is unavailable (\(error.localizedDescription)); these results come from \(fallback.name). \(fallback.queryHint)\n\n"
+            results = try await fallback.search(query, count: maxResults)
+        }
+        guard !results.isEmpty else { return ToolOutput(content: note + "No results for “\(query)”.") }
         let listing = results.enumerated().map { index, result in
             "[\(index + 1)] \(result.title)\n\(result.url)\n\(result.snippet)"
         }
         return ToolOutput(
-            content: listing.joined(separator: "\n\n"),
+            content: note + listing.joined(separator: "\n\n"),
             sources: results.map { SourceRef(title: $0.title, url: $0.url, snippet: $0.snippet) }
         )
     }

@@ -265,3 +265,28 @@ struct EchoTool: Tool {
         #expect(finished[1].1?.hasPrefix("You already made this exact call") == true)
     }
 }
+
+@Suite struct SearchFallbackTests {
+    struct Fixed: SearchBackend {
+        var name: String
+        var fails = false
+        func search(_ query: String, count: Int) async throws -> [SearchResult] {
+            if fails { throw URLError(.cannotConnectToHost) }
+            return [SearchResult(title: name, url: "https://\(name.lowercased()).example", snippet: "s")]
+        }
+    }
+
+    @Test func usesFallbackOnlyWhenPrimaryFails() async throws {
+        let healthy = try await WebSearchTool(backend: Fixed(name: "SearXNG"), fallback: Fixed(name: "Wikipedia")).run(["query": "x"])
+        #expect(healthy.content.hasPrefix("[1] SearXNG"))
+
+        let offline = try await WebSearchTool(backend: Fixed(name: "SearXNG", fails: true), fallback: Fixed(name: "Wikipedia")).run(["query": "x"])
+        #expect(offline.content.hasPrefix("Note: SearXNG is unavailable"))
+        #expect(offline.content.contains("[1] Wikipedia"))
+        #expect(offline.sources.map(\.title) == ["Wikipedia"])
+
+        await #expect(throws: URLError.self) {
+            try await WebSearchTool(backend: Fixed(name: "SearXNG", fails: true)).run(["query": "x"])
+        }
+    }
+}

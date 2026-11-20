@@ -96,11 +96,11 @@ private struct WebSearchSection: View {
         case .wikipedia:
             "Works without setup but only searches Wikipedia, which is weak for news, products and ambiguous names. Use SearXNG or an API for real web search."
         case .searxng:
-            "Local metasearch engine, e.g. via Docker. Its settings.yml must allow the json format."
+            "Self-hosted metasearch engine (e.g. Docker, reachable via Tailscale). Its settings.yml must allow the json format. Falls back to Wikipedia when unreachable."
         case .brave:
-            "Get a key at brave.com/search/api (free tier available). Stored in the Keychain."
+            "Get a key at brave.com/search/api (free tier available). Stored in the Keychain. Falls back to Wikipedia on errors."
         case .ollama:
-            "Uses an ollama.com API key. Stored in the Keychain."
+            "Uses an ollama.com API key. Stored in the Keychain. Falls back to Wikipedia on errors."
         }
     }
 }

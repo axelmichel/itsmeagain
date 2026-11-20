@@ -213,7 +213,9 @@ final class AppModel {
     func makeTools(for profile: TaskProfile) -> [any Tool] {
         profile.tools.compactMap { name -> (any Tool)? in
             switch name {
-            case TaskProfile.ToolName.webSearch: WebSearchTool(backend: makeSearchBackend())
+            case TaskProfile.ToolName.webSearch:
+                // Self-hosted or keyed backends can be offline; Wikipedia always answers.
+                WebSearchTool(backend: makeSearchBackend(), fallback: searchBackend == .wikipedia ? nil : WikipediaSearchBackend())
             case TaskProfile.ToolName.fetchPage: FetchPageTool()
             case TaskProfile.ToolName.searchDocuments: knowledge.makeTool()
             default: nil
