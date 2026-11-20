@@ -25,7 +25,7 @@ targets:
       - App
     dependencies:
       - package: CompanionKit
-        products: [CompanionCore, Providers, Persistence]
+        products: [CompanionCore, Providers, Persistence, Routing]
     entitlements:
       path: App/ItsMeAgain.entitlements
       properties:

@@ -41,7 +41,7 @@ struct ContentView: View {
             selection = empty
             return
         }
-        let conversation = Conversation(providerID: app.ollama.id.rawValue, modelID: app.defaultModel)
+        let conversation = Conversation(task: app.lastTask)
         context.insert(conversation)
         try? context.save()
         selection = conversation

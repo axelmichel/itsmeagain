@@ -12,7 +12,7 @@ import Testing
             for: Schema(CompanionSchema.models),
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        let conversation = Conversation(providerID: "ollama", modelID: "m")
+        let conversation = Conversation()
         container.mainContext.insert(conversation)
 
         conversation.append(role: .user, content: "one")

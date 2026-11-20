@@ -4,6 +4,23 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
+        TabView {
+            Tab("General", systemImage: "gearshape") {
+                GeneralSettings()
+            }
+            Tab("Tasks", systemImage: "square.stack.3d.up") {
+                TaskSettings()
+            }
+        }
+        .frame(width: 600)
+        .task { await app.refreshModels() }
+    }
+}
+
+private struct GeneralSettings: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
         @Bindable var app = app
         Form {
             Section("Ollama") {
@@ -21,13 +38,7 @@ struct SettingsView: View {
                     Task { await app.refreshModels() }
                 }
             }
-
-            Section("Defaults") {
-                ModelPicker(selection: $app.defaultModel)
-            }
         }
         .formStyle(.grouped)
-        .frame(width: 460)
-        .task { await app.refreshModels() }
     }
 }

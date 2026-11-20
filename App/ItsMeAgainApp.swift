@@ -10,12 +10,13 @@ struct ItsMeAgainApp: App {
         Window("ItsMeAgain", id: "main") {
             ContentView()
                 .environment(app)
-                .frame(minWidth: 720, minHeight: 480)
+                .frame(minWidth: 720, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
         }
         .modelContainer(for: CompanionSchema.models)
         .commands {
             // The main window owns ⌘N ("New Chat"); there is only one window.
             CommandGroup(replacing: .newItem) {}
+            TaskCommands(app: app)
         }
 
         Settings {

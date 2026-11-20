@@ -38,9 +38,12 @@ struct MessageRow: View {
                         .foregroundStyle(.red)
                 }
                 if let model = message.modelID {
-                    Text(model)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                    Label(
+                        [message.task?.title, model].compactMap(\.self).joined(separator: " · "),
+                        systemImage: message.task?.systemImage ?? "cpu"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
                 }
             }
         }

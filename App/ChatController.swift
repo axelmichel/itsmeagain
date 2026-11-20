@@ -2,6 +2,7 @@ import CompanionCore
 import Foundation
 import Observation
 import Persistence
+import Routing
 import SwiftData
 
 /// Runs model turns for conversations. Streams keep running when the user switches conversations.
@@ -14,20 +15,28 @@ final class ChatController {
         tasks[conversation.persistentModelID] != nil
     }
 
-    func send(_ text: String, in conversation: Conversation, using provider: any LLMProvider, context: ModelContext) {
+    func send(
+        _ text: String,
+        in conversation: Conversation,
+        using provider: any LLMProvider,
+        profile: TaskProfile,
+        model: String,
+        targetLanguage: String,
+        context: ModelContext
+    ) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isStreaming(conversation) else { return }
 
         if conversation.messages.isEmpty {
             conversation.title = Self.title(for: text)
         }
-        conversation.append(role: .user, content: text)
-        let request = ChatRequest(
-            model: conversation.modelID,
-            messages: conversation.chatMessages,
-            options: ChatOptions(keepAlive: "10m")
+        conversation.append(role: .user, content: text, task: profile.task)
+        let request = profile.makeRequest(
+            history: conversation.chatMessages,
+            model: model,
+            targetLanguage: targetLanguage
         )
-        let reply = conversation.append(role: .assistant, content: "", modelID: conversation.modelID)
+        let reply = conversation.append(role: .assistant, content: "", modelID: model, task: profile.task)
         try? context.save()
 
         let key = conversation.persistentModelID

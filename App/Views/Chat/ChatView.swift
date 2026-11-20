@@ -27,38 +27,20 @@ struct ChatView: View {
 
             Divider()
 
-            Composer(text: $draft, isStreaming: isStreaming, onSend: send) {
-                app.chat.stop(conversation)
+            VStack(alignment: .leading, spacing: 4) {
+                TaskBar(conversation: conversation)
+                Composer(text: $draft, isStreaming: isStreaming, onSend: send) {
+                    app.chat.stop(conversation)
+                }
             }
+            .padding(.top, 8)
         }
         .navigationTitle(conversation.title)
-        .toolbar {
-            ToolbarItem {
-                ModelPicker(selection: $conversation.modelID)
-            }
-        }
+        .focusedSceneValue(\.activeConversation, conversation)
     }
 
     private func send() {
-        app.chat.send(draft, in: conversation, using: app.ollama, context: context)
+        app.send(draft, in: conversation, context: context)
         draft = ""
-    }
-}
-
-struct ModelPicker: View {
-    @Binding var selection: String
-    @Environment(AppModel.self) private var app
-
-    var body: some View {
-        Picker("Model", selection: $selection) {
-            if !app.models.contains(where: { $0.id == selection }) {
-                Text(selection).tag(selection)
-            }
-            ForEach(app.models) { model in
-                Text(model.displayName).tag(model.id)
-            }
-        }
-        .help(app.modelsError ?? "Model used for the next reply")
-        .frame(minWidth: 180)
     }
 }
