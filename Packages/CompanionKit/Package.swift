@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "Automation", targets: ["Automation"]),
         .library(name: "PersonalData", targets: ["PersonalData"]),
         .library(name: "Mail", targets: ["Mail"]),
+        .library(name: "Memory", targets: ["Memory"]),
     ],
     dependencies: [
         .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.14.0"),
@@ -31,10 +32,11 @@ let package = Package(
         .target(name: "Automation"),
         .target(name: "PersonalData", dependencies: ["CompanionCore", "Tools"]),
         .target(name: "Mail", dependencies: ["CompanionCore", "Tools"]),
+        .target(name: "Memory", dependencies: ["CompanionCore", "Tools"]),
         .target(name: "Persistence", dependencies: ["CompanionCore", "Routing", "Tools", "Automation", "PersonalData", "Mail"]),
         .testTarget(
             name: "CompanionKitTests",
-            dependencies: ["CompanionCore", "Providers", "Persistence", "Routing", "AppleIntelligence", "Tools", "Knowledge", "Commands", "Automation", "PersonalData", "Mail"]
+            dependencies: ["CompanionCore", "Providers", "Persistence", "Routing", "AppleIntelligence", "Tools", "Knowledge", "Commands", "Automation", "PersonalData", "Mail", "Memory"]
         ),
     ]
 )

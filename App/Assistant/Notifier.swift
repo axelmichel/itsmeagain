@@ -8,9 +8,11 @@ import UserNotifications
 @MainActor
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     nonisolated static let conversationKey = "conversationID"
+    nonisolated static let memoryKey = "openMemory"
 
     /// Called with `Conversation.id` when the user clicks a notification.
     var onOpenConversation: (UUID) -> Void = { _ in }
+    var onOpenMemory: () -> Void = {}
 
     private var center: UNUserNotificationCenter { .current() }
 
@@ -30,11 +32,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    func post(title: String, body: String, conversationID: UUID?) {
+    func post(title: String, body: String, conversationID: UUID?, opensMemory: Bool = false) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         if let conversationID { content.userInfo = [Self.conversationKey: conversationID.uuidString] }
+        if opensMemory { content.userInfo = [Self.memoryKey: true] }
         center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
@@ -46,6 +49,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        if response.notification.request.content.userInfo[Self.memoryKey] as? Bool == true {
+            await MainActor.run { onOpenMemory() }
+            return
+        }
         let raw = response.notification.request.content.userInfo[Self.conversationKey] as? String
         guard let raw, let id = UUID(uuidString: raw) else { return }
         await MainActor.run { onOpenConversation(id) }

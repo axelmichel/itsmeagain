@@ -98,9 +98,25 @@ public struct CommandRegistry: Sendable {
         ),
     ]
 
+    /// Personal memory (Chat mode, local models only).
+    public static let memory: [CommandSpec] = [
+        CommandSpec(name: "remember", summary: "Remember a fact about you, a person or a preference", argumentHint: "<fact>", kind: .native(handler: "remember"), scope: .personal),
+        CommandSpec(name: "forget", summary: "Find memories to forget", argumentHint: "<word>", kind: .native(handler: "forget"), scope: .personal),
+        CommandSpec(name: "memories", summary: "What I know about you", argumentHint: "[kind]", kind: .native(handler: "memories"), scope: .personal),
+        CommandSpec(name: "whoami", summary: "Your profile as I use it in every Chat answer", kind: .native(handler: "whoami"), scope: .personal),
+    ]
+
     /// Apple Mail commands (personal). Mail is only read; replies become drafts the user sends.
     public static let mail: [CommandSpec] = [
         CommandSpec(name: "inbox", summary: "Unread mail of the last two days", argumentHint: "[account]", kind: .native(handler: "inbox"), scope: .personal),
+        CommandSpec(
+            name: "appointments", summary: "Find appointments in unread mail, check your time, add them", argumentHint: "[days]",
+            kind: .native(handler: "appointments"), scope: .personal
+        ),
+        CommandSpec(
+            name: "watched", summary: "Unread mail from your important senders, by address",
+            kind: .native(handler: "watched"), scope: .personal, aliases: ["vip"]
+        ),
         CommandSpec(
             name: "cleanup", summary: "Junk spam by your rules, decide on new mailing lists",
             kind: .native(handler: "cleanup"), scope: .personal, aliases: ["spam"]

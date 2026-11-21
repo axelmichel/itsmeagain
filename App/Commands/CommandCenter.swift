@@ -7,7 +7,7 @@ import Observation
 @MainActor
 @Observable
 final class CommandCenter {
-    static let builtIns = CommandRegistry.general + CommandRegistry.calendar + CommandRegistry.mail
+    static let builtIns = CommandRegistry.general + CommandRegistry.calendar + CommandRegistry.mail + CommandRegistry.memory
     private(set) var registry = CommandRegistry(builtIns: CommandCenter.builtIns)
     private(set) var fileErrors: [CommandLibrary.FileError] = []
     let directory = AppData.directory.appending(path: "Commands", directoryHint: .isDirectory)

@@ -115,6 +115,15 @@ extension AppModel {
         case "digest":
             return runDigestCommand(input: input, text: text, in: conversation, context: context)
 
+        case "appointments":
+            return runAppointmentsCommand(input: input, text: text, in: conversation, context: context)
+
+        case "watched":
+            return runWatchedCommand(text: text, in: conversation, context: context)
+
+        case _ where Self.memoryHandlers.contains(handler):
+            return runMemoryCommand(handler, input: input, text: text, in: conversation, context: context)
+
         case _ where Self.calendarHandlers.contains(handler):
             return runCalendarCommand(handler, input: input, text: text, in: conversation, context: context)
 

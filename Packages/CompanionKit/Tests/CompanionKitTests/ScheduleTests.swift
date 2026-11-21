@@ -75,3 +75,19 @@ import Testing
         }
     }
 }
+
+@Suite struct AutomationStepsTests {
+    @Test func oneStepPerLineWithoutCommentsOrBlanks() {
+        let text = """
+            # Morning routine
+            /cleanup
+
+              /digest
+            # then the calendar
+            What's on today, and which mails need a reply?
+            """
+        #expect(AutomationSteps.parse(text) == ["/cleanup", "/digest", "What's on today, and which mails need a reply?"])
+        #expect(AutomationSteps.parse("/brief") == ["/brief"])
+        #expect(AutomationSteps.parse("  \n# only a comment\n").isEmpty)
+    }
+}

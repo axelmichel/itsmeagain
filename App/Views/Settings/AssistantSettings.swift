@@ -1,5 +1,6 @@
 import AppKit
 import Mail
+import Memory
 import PersonalData
 import SwiftUI
 
@@ -50,6 +51,7 @@ struct AssistantSettings: View {
 
             MailSettingsSection()
                 if app.mailEnabled { MailRulesSection() }
+                MemorySettingsSection()
 
             Section {
                 Toggle("Create reminders without asking", isOn: $app.remindersWithoutAsking)
@@ -129,6 +131,13 @@ private struct MailSettingsSection: View {
                     TextField("tom@company.de, Anna Weber", text: $app.vipSenders, axis: .vertical)
                         .lineLimit(1...3)
                 }
+                Toggle("Check new mail in the background", isOn: $app.mailWatchEnabled)
+                if app.mailWatchEnabled {
+                    Toggle("Notify me about mail from important senders", isOn: $app.notifyImportantMail)
+                        .padding(.leading, 16)
+                    Toggle("Find appointments in new mail and ask me", isOn: $app.findAppointmentsInMail)
+                        .padding(.leading, 16)
+                }
                 LabeledContent("Newsletter senders") {
                     TextField("digest@, news.example.com", text: $app.newsletterSenders, axis: .vertical)
                         .lineLimit(1...3)
@@ -140,7 +149,10 @@ private struct MailSettingsSection: View {
             Text("""
                 Reads recent mail from Apple Mail (all accounts configured there) on this Mac only. macOS asks once to \
                 let ItsMeAgain control Mail. Important senders come first in /inbox, /triage and the brief; automated \
-                senders (noreply, newsletters) are summarised in one line.
+                senders (noreply, newsletters) are summarised in one line. The background check runs every five \
+                minutes: new mail from important senders notifies you (one notification per sender), and appointments \
+                found in mail (invitations, or text read by your local model) are checked against your calendar and \
+                offered with Add / Ignore in the "Mail watch" conversation. Nothing is added without your click.
                 """)
             .foregroundStyle(.secondary)
         }
@@ -213,6 +225,44 @@ private struct MailRulesSection: View {
                 junked or archived by a rule. New mailing lists get a \
                 suggestion from your local Chat model, based on the choices you made before; mail only moves on your \
                 rules, never on a suggestion.
+                """)
+            .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct MemorySettingsSection: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        @Bindable var memory = app.memory
+        Section {
+            Toggle("Learn from my Chat messages", isOn: $memory.learningEnabled)
+            LabeledContent("Accept without asking") {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(MemoryKind.allCases) { kind in
+                        Toggle(kind.title, isOn: Binding(
+                            get: { memory.autoAccept.contains(kind) },
+                            set: { on in if on { memory.autoAccept.insert(kind) } else { memory.autoAccept.remove(kind) } }
+                        ))
+                    }
+                }
+            }
+            HStack {
+                Text("\(memory.book.active.count) memories, \(memory.book.pending.count) to review")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Show File in Finder") { NSWorkspace.shared.activateFileViewerSelecting([AppData.memory]) }
+                Button("Open Memory") { app.sidebarMode = .memory; app.openMainWindow() }
+            }
+        } header: {
+            Text("Memory")
+        } footer: {
+            Text("""
+                After a Chat conversation has been idle for ten minutes, your local Chat model reads your own messages \
+                in it (never mail, web pages, tool results or its own replies) and proposes lasting facts. Kinds checked \
+                above are kept right away; everything else, updates of known facts and anything sensitive waits for your \
+                review in the Memory tab. Memory is only used in Chat mode and only with local models.
                 """)
             .foregroundStyle(.secondary)
         }

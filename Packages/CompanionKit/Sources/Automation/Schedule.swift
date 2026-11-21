@@ -86,3 +86,13 @@ public enum Schedule {
         }
     }
 }
+
+/// An automation's "Command or prompt" field: one step per line (a /command or a prompt), run in
+/// order in the same conversation. Empty lines and lines starting with `#` are skipped.
+public enum AutomationSteps {
+    public static func parse(_ text: String) -> [String] {
+        text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+    }
+}

@@ -150,14 +150,22 @@ public enum MessageAttachment: Codable, Sendable, Hashable {
     case mailCleanup(groups: [SenderGroup])
     /// A live calendar card (events are read from EventKit when shown); `date` is the selected day.
     case calendar(style: CalendarCardStyle, date: Date)
+    /// Memory items with Forget / Edit / Accept (read live from the memory file).
+    case memories(title: String, ids: [UUID])
+    /// Appointments found in mail, with free/conflict status and Add / Ignore.
+    case appointments([AppointmentProposal])
 
     public var textForModel: String {
         switch self {
         case .reminders(let title, let items):
             guard !items.isEmpty else { return "\(title): none" }
             return "\(title):\n" + items.map { "- " + AgendaFormatter.reminderLine($0) + " (id \($0.id))" }.joined(separator: "\n")
-        case .calendar:
-            // The listing the model needs is in the message's modelContent.
+        case .appointments(let items):
+            return "Appointments found in mail:\n" + items.map { item in
+                "- \(item.title), \(ToolDate.day(item.start)) \(item.isAllDay ? "all day" : ToolDate.time(item.start)) (from \(item.sender); \(item.status.rawValue))"
+            }.joined(separator: "\n")
+        case .calendar, .memories:
+            // The listing the model needs is in the message's content or modelContent.
             return ""
         case .mailCleanup(let groups):
             guard !groups.isEmpty else { return "" }

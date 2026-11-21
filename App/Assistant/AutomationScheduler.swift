@@ -104,26 +104,78 @@ final class AutomationScheduler {
             task: .chat
         )
         context.insert(conversation)
+        // The run's own notification reports the result; no second "Done" notice.
+        app.chat.quiet.insert(conversation.persistentModelID)
         let record = AutomationRun(conversationID: conversation.id)
         automation.runs.append(record)
         try? context.save()
 
-        let command = automation.command.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !command.isEmpty else {
+        let steps = AutomationSteps.parse(automation.command)
+        guard !steps.isEmpty else {
             finish(record, automation, status: .skipped, summary: "No command or prompt set.")
             return
         }
-        if CommandInput(command) != nil {
-            if case .failed(let message)? = app.runCommand(command, in: conversation, context: context, onRedirect: { _ in }) {
-                finish(record, automation, status: .failed, summary: message)
-                return
+
+        // Steps run one after another in the same conversation; a failed step doesn't stop the rest.
+        var results: [StepResult] = []
+        for step in steps {
+            let before = conversation.messages.count
+            if CommandInput(step) != nil {
+                if case .failed(let message)? = app.runCommand(step, in: conversation, context: context, onRedirect: { _ in }) {
+                    results.append(StepResult(step: step, error: message))
+                    continue
+                }
+            } else {
+                app.send(step, in: conversation, context: context)
             }
-        } else {
-            app.send(command, in: conversation, context: context)
+            if await waitForTurn(in: conversation, automation: automation, record: record, started: .now) == .timedOut {
+                app.chat.stop(conversation)
+                results.append(StepResult(step: step, error: "Stopped after 15 minutes on this step."))
+                break
+            }
+            // This step's answer: the last assistant message it added.
+            let reply = conversation.orderedMessages.dropFirst(before).last { $0.role == .assistant }
+            results.append(StepResult(step: step, reply: reply?.content ?? "", error: reply?.errorText))
         }
 
-        // Wait for the turn (including any queued messages) to finish.
-        let started = ContinuousClock.now
+        // Ollama down (e.g. right after wake): retry a couple of times before reporting.
+        if results.allSatisfy({ $0.error?.localizedCaseInsensitiveContains("not reachable") == true }), attempt < Self.maxAttempts {
+            finish(record, automation, status: .failed, summary: "\(results.first?.error ?? "") Retrying in 5 minutes.", notify: false)
+            Task {
+                try? await Task.sleep(for: Self.retryDelay)
+                enqueue(automation.id, attempt: attempt + 1)
+            }
+            return
+        }
+        let failed = results.contains { $0.error != nil }
+        finish(record, automation, status: failed ? .failed : .succeeded, summary: Self.summary(of: results))
+    }
+
+    struct StepResult {
+        var step: String
+        var reply: String = ""
+        var error: String?
+    }
+
+    /// One step: its answer's first lines. Several: "1. /cleanup — … · 2. /digest failed: …".
+    static func summary(of results: [StepResult]) -> String {
+        if results.count == 1, let only = results.first {
+            return only.error ?? summary(of: only.reply)
+        }
+        let parts = results.enumerated().map { index, result in
+            let name = result.step.hasPrefix("/") ? String(result.step.split(separator: " ").first ?? "") : "Prompt"
+            if let error = result.error { return "\(index + 1). \(name) failed: \(error)" }
+            return "\(index + 1). \(name) — \(summary(of: result.reply).prefix(90))"
+        }
+        let text = parts.joined(separator: " · ")
+        return text.count > 400 ? String(text.prefix(400)) + "…" : text
+    }
+
+    private enum TurnEnd { case finished, timedOut }
+
+    /// Waits for the running reply or command (and anything queued behind it); notifies once if it
+    /// needs approval and denies it after the approval timeout.
+    private func waitForTurn(in conversation: Conversation, automation: Automation, record: AutomationRun, started: ContinuousClock.Instant) async -> TurnEnd {
         var approvalSince: Date?
         while app.chat.isStreaming(conversation) {
             try? await Task.sleep(for: .seconds(1))
@@ -140,29 +192,13 @@ final class AutomationScheduler {
                 } else if let since = approvalSince, Date.now.timeIntervalSince(since) > Self.approvalTimeout {
                     for step in pending { app.approvals.resolve(step.id, granted: false) }
                 }
+            } else if record.status == .needsApproval {
+                record.status = .running
+                approvalSince = nil
             }
-            if ContinuousClock.now - started > Self.runTimeout {
-                app.chat.stop(conversation)
-                finish(record, automation, status: .failed, summary: "Stopped after 15 minutes.")
-                return
-            }
+            if ContinuousClock.now - started > Self.runTimeout { return .timedOut }
         }
-
-        let reply = conversation.orderedMessages.last { $0.role == .assistant }
-        if let error = reply?.errorText {
-            // Ollama down (e.g. right after wake): retry a couple of times before reporting.
-            if error.localizedCaseInsensitiveContains("not reachable"), attempt < Self.maxAttempts {
-                finish(record, automation, status: .failed, summary: "\(error) Retrying in 5 minutes.", notify: false)
-                Task {
-                    try? await Task.sleep(for: Self.retryDelay)
-                    enqueue(automation.id, attempt: attempt + 1)
-                }
-                return
-            }
-            finish(record, automation, status: .failed, summary: error)
-        } else {
-            finish(record, automation, status: .succeeded, summary: Self.summary(of: reply?.content ?? ""))
-        }
+        return .finished
     }
 
     private func pendingApprovals(in conversation: Conversation) -> [ToolStep] {

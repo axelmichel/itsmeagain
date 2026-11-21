@@ -1,3 +1,4 @@
+import Memory
 import Persistence
 import SwiftUI
 
@@ -15,10 +16,10 @@ struct Sidebar: View {
             HStack(spacing: 10) {
                 Spacer()
                 HeaderButton("Hide Sidebar", systemImage: "sidebar.left", action: onToggleSidebar)
-                if app.sidebarMode == .chats {
-                    HeaderButton("New Chat", systemImage: "square.and.pencil", action: onNewChat)
-                } else {
-                    HeaderButton("New Automation", systemImage: "plus", action: onNewAutomation)
+                switch app.sidebarMode {
+                case .chats: HeaderButton("New Chat", systemImage: "square.and.pencil", action: onNewChat)
+                case .automations: HeaderButton("New Automation", systemImage: "plus", action: onNewAutomation)
+                case .memory: EmptyView()
                 }
             }
             .padding(.horizontal, 12)
@@ -27,6 +28,7 @@ struct Sidebar: View {
             HStack(spacing: 0) {
                 modeButton("Chats", mode: .chats)
                 modeButton("Automations", mode: .automations)
+                modeButton(memoryTitle, mode: .memory)
             }
             .frame(height: 30)
             .background(Theme.sidebar)
@@ -35,9 +37,15 @@ struct Sidebar: View {
             switch app.sidebarMode {
             case .chats: ConversationList(selection: $conversation)
             case .automations: AutomationList(selection: $automation)
+            case .memory: MemorySidebar()
             }
         }
         .background(Theme.sidebar)
+    }
+
+    private var memoryTitle: String {
+        let pending = app.memory.book.pending.count
+        return pending > 0 ? "Memory (\(pending))" : "Memory"
     }
 
     private func modeButton(_ title: String, mode: AppModel.SidebarMode) -> some View {
@@ -56,5 +64,38 @@ struct Sidebar: View {
         }
         .buttonStyle(.plain)
         .focusable(false)
+    }
+}
+
+/// Counts per kind; the Memory page itself is in the detail area.
+private struct MemorySidebar: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        let book = app.memory.book
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                if !book.pending.isEmpty {
+                    row("To review", count: book.pending.count, systemImage: "tray", accent: true)
+                }
+                ForEach(MemoryKind.allCases) { kind in
+                    row(kind.title, count: book.active.filter { $0.kind == kind }.count, systemImage: "circle.fill", accent: false)
+                }
+                Text("Only your own Chat messages are read, only on this Mac, and only local models ever see this.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 10)
+            }
+            .padding(12)
+        }
+    }
+
+    private func row(_ title: String, count: Int, systemImage: String, accent: Bool) -> some View {
+        HStack {
+            Text(title).foregroundStyle(accent ? Theme.accent : .primary)
+            Spacer()
+            Text("\(count)").foregroundStyle(.secondary).monospacedDigit()
+        }
+        .font(.callout)
     }
 }

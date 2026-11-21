@@ -65,3 +65,51 @@ public enum ProviderError: LocalizedError, Sendable, Equatable {
         }
     }
 }
+
+/// One constrained-JSON completion without tools (classification, extraction).
+///
+/// Local models under a JSON-schema grammar sometimes run away in whitespace and never close the
+/// object (seen with gemma4 when keys come in an unexpected order). Such streams are cut off early;
+/// later attempts use plain JSON mode with the schema in the prompt, which measured reliable.
+public enum StructuredCompletion {
+    public static func json<Value: Decodable>(
+        _ type: Value.Type,
+        provider: any LLMProvider,
+        model: String,
+        system: String,
+        user: String,
+        schema: JSONValue,
+        maxTokens: Int,
+        contextLength: Int = 16_384,
+        attempts: Int = 3
+    ) async throws -> Value {
+        var lastOutput = ""
+        for attempt in 0..<max(attempts, 1) {
+            let constrained = attempt == 0
+            let request = ChatRequest(
+                model: model,
+                system: constrained ? system : system + "\n\nAnswer with one JSON object only, following this JSON Schema:\n" + schema.jsonString,
+                messages: [.user(user)],
+                options: ChatOptions(
+                    temperature: constrained ? 0 : 0.3, contextLength: contextLength, keepAlive: "10m", think: false, maxTokens: maxTokens
+                ),
+                responseFormat: constrained ? schema : "json"
+            )
+            var output = ""
+            for try await event in provider.stream(request) {
+                guard case .textDelta(let delta) = event else { continue }
+                output += delta
+                if isRunaway(output) { break }
+            }
+            if let value = try? JSONDecoder().decode(Value.self, from: Data(output.utf8)) { return value }
+            lastOutput = output
+        }
+        throw ProviderError.invalidResponse("expected JSON, got \(lastOutput.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))")
+    }
+
+    /// Only whitespace for the last 64 characters: the model is stuck.
+    static func isRunaway(_ output: String) -> Bool {
+        guard output.count > 64 else { return false }
+        return output.suffix(64).allSatisfy(\.isWhitespace)
+    }
+}

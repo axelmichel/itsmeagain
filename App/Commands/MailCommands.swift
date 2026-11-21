@@ -79,6 +79,61 @@ extension AppModel {
         return .handled
     }
 
+    /// `/appointments [days]`: appointments in unread mail (default: last 14 days), each with your
+    /// free/conflict status and Add / Ignore.
+    func runAppointmentsCommand(input: CommandInput, text: String, in conversation: Conversation, context: ModelContext) -> CommandOutcome {
+        guard mailEnabled else { return .failed("Mail is turned off in Settings → Assistant.") }
+        guard !chat.isStreaming(conversation) else { return .failed("Wait for the current reply to finish.") }
+        guard let watcher = mailWatcher else { return .failed("Mail isn't ready yet.") }
+        let days = input.positional.first.flatMap(Int.init).map { min(max($0, 1), 60) } ?? 14
+        let reply = start(text, in: conversation, context: context, status: "_Reading unread mail…_")
+        chat.run(in: conversation, context: context) {
+            do {
+                let found = try await watcher.findAppointments(days: days) { done, total in
+                    reply.content = "_Reading unread mail… \(done) of \(total)_"
+                }
+                reply.content = found.isEmpty
+                    ? "No appointments in your unread mail of the last \(days) days."
+                    : "**\(found.count) \(found.count == 1 ? "appointment" : "appointments")** in your unread mail of the last \(days) days:"
+                if !found.isEmpty { reply.attachments = [.appointments(found)] }
+            } catch {
+                reply.content = ""
+                reply.errorText = error.localizedDescription
+            }
+        }
+        return .handled
+    }
+
+    /// `/watched`: unread mail from important senders of the last seven days, grouped by address.
+    func runWatchedCommand(text: String, in conversation: Conversation, context: ModelContext) -> CommandOutcome {
+        guard mailEnabled else { return .failed("Mail is turned off in Settings → Assistant.") }
+        let preferences = mailPreferences
+        guard !preferences.vipSenders.isEmpty else {
+            return .failed("Add important senders first: Settings → Assistant → Mail → Important senders.")
+        }
+        guard !chat.isStreaming(conversation) else { return .failed("Wait for the current reply to finish.") }
+        let reply = start(text, in: conversation, context: context, status: "_Checking mail…_")
+        let source = mailSource
+        chat.run(in: conversation, context: context) {
+            do {
+                let messages = try await source.recent(days: 7, unreadOnly: true, limit: 200).filter(preferences.includes)
+                let groups = MailWatch.fromImportant(messages, preferences: preferences, seen: [])
+                if groups.isEmpty {
+                    reply.content = "No unread mail from your important senders in the last seven days."
+                } else {
+                    reply.content = groups.map { group in
+                        "**\(group.messages[0].senderName)** · \(group.address) (\(group.messages.count))\n"
+                            + group.messages.map { MailFormatter.line($0, preferences: preferences, markdown: true) }.joined(separator: "\n")
+                    }.joined(separator: "\n\n")
+                }
+            } catch {
+                reply.content = ""
+                reply.errorText = error.localizedDescription
+            }
+        }
+        return .handled
+    }
+
     private func start(_ text: String, in conversation: Conversation, context: ModelContext, status: String) -> StoredMessage {
         if conversation.messages.isEmpty { conversation.title = text }
         conversation.append(role: .user, content: text, task: .chat)

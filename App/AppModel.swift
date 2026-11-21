@@ -3,6 +3,7 @@ import CompanionCore
 import Foundation
 import Knowledge
 import Mail
+import Memory
 import PersonalData
 import Observation
 import Persistence
@@ -83,9 +84,10 @@ final class AppModel {
     let approvals = ApprovalCenter()
     let commands = CommandCenter()
     @ObservationIgnored let notifier = Notifier()
+    let memory = MemoryModel()
     @ObservationIgnored private(set) var scheduler: AutomationScheduler?
 
-    enum SidebarMode: String { case chats, automations }
+    enum SidebarMode: String { case chats, automations, memory }
 
     // MARK: Assistant settings
 
@@ -160,6 +162,25 @@ final class AppModel {
     }
 
     let mailSource: any MailSource = AppleMailSource()
+    @ObservationIgnored private(set) var mailWatcher: MailWatcher?
+
+    /// Check new mail every five minutes in the background.
+    var mailWatchEnabled: Bool = UserDefaults.standard.object(forKey: "mailWatchEnabled") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(mailWatchEnabled, forKey: "mailWatchEnabled")
+            if mailWatchEnabled { mailWatcher?.checkSoon() }
+        }
+    }
+
+    /// A notification per important sender with new mail (Settings → Important senders).
+    var notifyImportantMail: Bool = UserDefaults.standard.object(forKey: "notifyImportantMail") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(notifyImportantMail, forKey: "notifyImportantMail") }
+    }
+
+    /// Read new mail for appointments (invitations exactly, other mail with the local model).
+    var findAppointmentsInMail: Bool = UserDefaults.standard.object(forKey: "findAppointmentsInMail") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(findAppointmentsInMail, forKey: "findAppointmentsInMail") }
+    }
 
     /// Calendar, reminder and mail tools — only ever added to local-only tasks.
     var personalTools: [any Tool] {
@@ -167,7 +188,49 @@ final class AppModel {
             store: EventKitStore.shared, events: EventKitStore.eventsAuthorized, reminders: EventKitStore.remindersAuthorized
         )
         if mailEnabled { tools += MailToolbox.tools(source: mailSource, preferences: mailPreferences) }
+        tools += [RecallTool(memory: memory), RememberTool(memory: memory)]
         return tools
+    }
+
+    // MARK: Task notifications
+
+    /// A macOS notification when a long reply or command finishes while you're elsewhere.
+    var notifyWhenDone: Bool = UserDefaults.standard.object(forKey: "notifyWhenDone") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(notifyWhenDone, forKey: "notifyWhenDone")
+            if notifyWhenDone { Task { await notifier.requestPermission() } }
+        }
+    }
+
+    /// Only tasks that ran at least this long (seconds).
+    var notifyAfterSeconds: Int = UserDefaults.standard.object(forKey: "notifyAfterSeconds") as? Int ?? 30 {
+        didSet { UserDefaults.standard.set(notifyAfterSeconds, forKey: "notifyAfterSeconds") }
+    }
+
+    /// Show the start of the answer in the notification (off keeps mail and calendar details off the screen).
+    var notifyWithPreview: Bool = UserDefaults.standard.object(forKey: "notifyWithPreview") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(notifyWithPreview, forKey: "notifyWithPreview") }
+    }
+
+    /// The conversation shown in the main window, so finishing it while you watch doesn't notify.
+    var visibleConversation: PersistentIdentifier?
+
+    private func taskFinished(_ conversation: Conversation, reply: StoredMessage?, duration: Duration) {
+        let key = conversation.persistentModelID
+        guard notifyWhenDone, duration >= .seconds(notifyAfterSeconds), !chat.quiet.contains(key) else { return }
+        if NSApp.isActive, visibleConversation == key { return }
+        let failed = reply?.errorText != nil
+        let title = (failed ? "Failed: " : "Done: ") + conversation.title
+        var body = failed ? reply?.errorText ?? "" : "Finished after \(Self.durationText(duration))."
+        if notifyWithPreview, !failed, let content = reply?.content, !content.isEmpty {
+            body = AutomationScheduler.summary(of: content)
+        }
+        notifier.post(title: title, body: body, conversationID: conversation.id)
+    }
+
+    private static func durationText(_ duration: Duration) -> String {
+        let seconds = Int(duration.components.seconds)
+        return seconds < 90 ? "\(seconds) s" : "\(seconds / 60) min"
     }
 
     /// Write tools the user allowed globally.
@@ -248,6 +311,11 @@ final class AppModel {
 
     /// Automations and notifications (clicking a notification opens its conversation).
     func installAssistant(container: ModelContainer) {
+        ChatController.markInterruptedReplies(in: container.mainContext)
+        chat.onFinished = { [unowned self] conversation, reply, duration in
+            taskFinished(conversation, reply: reply, duration: duration)
+        }
+        if notifyWhenDone { Task { await notifier.requestPermission() } }
         notifier.onOpenConversation = { [weak self] id in
             guard let self,
                 let conversation = try? container.mainContext.fetch(
@@ -258,9 +326,32 @@ final class AppModel {
             requestedConversation = conversation.persistentModelID
             openMainWindow()
         }
+        notifier.onOpenMemory = { [weak self] in
+            self?.sidebarMode = .memory
+            self?.openMainWindow()
+        }
         let scheduler = AutomationScheduler(app: self, container: container, notifier: notifier)
         self.scheduler = scheduler
         scheduler.start()
+
+        memory.chatModel = { [unowned self] in
+            let model = try localMailModel()
+            return (model.provider, model.model)
+        }
+        memory.embedder = { [unowned self] in (knowledge.embedder, knowledge.embeddingModel) }
+        memory.onLearned = { [unowned self] pending in
+            notifier.post(
+                title: "ItsMeAgain noticed something",
+                body: pending == 1 ? "1 new thing about you to review" : "\(pending) new things about you to review",
+                conversationID: nil,
+                opensMemory: true
+            )
+        }
+        Task { await memory.load() }
+        let mailWatcher = MailWatcher(app: self, container: container)
+        self.mailWatcher = mailWatcher
+        mailWatcher.start()
+        memory.startLearning(container: container) { [unowned self] in chat.isBusy }
     }
 
     /// Temporarily off while the user records a new shortcut.
@@ -464,6 +555,8 @@ final class AppModel {
                 )
             }
             let approvals = approvals
+            // Memory only for local-only tasks (Chat) on a local provider — never for cloud models.
+            let memoryContext = profile.localOnly ? await memory.context(for: text, providerIsLocal: config.isLocal) : nil
             return TurnPlan(
                 provider: provider,
                 profile: profile,
@@ -476,7 +569,8 @@ final class AppModel {
                 ) { request in
                     await approvals.request(request)
                 },
-                finalize: command?.finalize
+                finalize: command?.finalize,
+                systemSuffix: memoryContext
             )
         }
     }

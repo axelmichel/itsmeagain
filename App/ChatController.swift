@@ -16,6 +16,8 @@ struct TurnPlan {
     var policy: ToolPolicy
     /// Runs after a successful reply (e.g. /brief attaches the due reminders).
     var finalize: (@MainActor (StoredMessage) async -> Void)?
+    /// Appended to the system prompt (the memory section; local providers only).
+    var systemSuffix: String? = nil
 }
 
 /// Runs model turns for conversations. Streams keep running when the user switches conversations.
@@ -37,6 +39,14 @@ final class ChatController {
     private var queues: [PersistentIdentifier: [QueuedMessage]] = [:]
     /// Stopping a reply pauses its conversation's queue until the user resumes or sends again.
     private var paused: Set<PersistentIdentifier> = []
+
+    /// Called when a reply or native command ends (not when the user stopped it), with how long it ran.
+    @ObservationIgnored var onFinished: (_ conversation: Conversation, _ reply: StoredMessage?, _ duration: Duration) -> Void = { _, _, _ in }
+    /// Conversations whose completion is reported elsewhere (automation runs notify on their own).
+    @ObservationIgnored var quiet: Set<PersistentIdentifier> = []
+
+    /// Any reply or command running (background learning waits for the model to be free).
+    var isBusy: Bool { !tasks.isEmpty }
 
     func isStreaming(_ conversation: Conversation) -> Bool {
         tasks[conversation.persistentModelID] != nil
@@ -71,14 +81,50 @@ final class ChatController {
     func run(in conversation: Conversation, context: ModelContext, _ work: @escaping @MainActor () async -> Void) -> Bool {
         guard !isStreaming(conversation) else { return false }
         let key = conversation.persistentModelID
+        // The command's reply is the placeholder it just appended.
+        let reply = conversation.orderedMessages.last { $0.role == .assistant }
+        if let reply { Self.markRunning(reply.id, true) }
+        let started = ContinuousClock.now
         tasks[key] = Task {
             await work()
+            if let reply { Self.markRunning(reply.id, false) }
+            if !Task.isCancelled { onFinished(conversation, reply, ContinuousClock.now - started) }
             conversation.updatedAt = .now
             try? context.save()
             tasks[key] = nil
             startNext(in: conversation)
         }
         return true
+    }
+
+    // MARK: Interrupted work
+
+    /// Replies being written right now, kept in the defaults so a quit or crash mid-reply can be shown
+    /// as interrupted on the next launch instead of looking like it's still running.
+    private static let runningKey = "runningReplies"
+
+    private static func markRunning(_ id: UUID, _ running: Bool) {
+        var ids = Set(UserDefaults.standard.stringArray(forKey: runningKey) ?? [])
+        if running { ids.insert(id.uuidString) } else { ids.remove(id.uuidString) }
+        UserDefaults.standard.set(Array(ids), forKey: runningKey)
+    }
+
+    /// At launch: replies that were still running when the app last quit.
+    static func markInterruptedReplies(in context: ModelContext) {
+        let ids = (UserDefaults.standard.stringArray(forKey: runningKey) ?? []).compactMap(UUID.init(uuidString:))
+        UserDefaults.standard.removeObject(forKey: runningKey)
+        guard !ids.isEmpty else { return }
+        for id in ids {
+            let descriptor = FetchDescriptor<StoredMessage>(predicate: #Predicate { $0.id == id })
+            guard let message = try? context.fetch(descriptor).first, message.errorText == nil else { continue }
+            message.errorText = "Interrupted: ItsMeAgain quit before this finished. Run it again."
+            message.toolSteps = message.toolSteps.map { step in
+                var step = step
+                if step.status == .running || step.status == .awaitingApproval { step.status = .failed; step.error = "Stopped" }
+                return step
+            }
+        }
+        try? context.save()
     }
 
     func resume(_ conversation: Conversation) {
@@ -116,6 +162,8 @@ final class ChatController {
         try? context.save()
 
         let key = conversation.persistentModelID
+        Self.markRunning(reply.id, true)
+        let started = ContinuousClock.now
         tasks[key] = Task {
             var cancelled = false
             do {
@@ -123,11 +171,14 @@ final class ChatController {
                 prompt.taskRaw = plan.profile.task.rawValue
                 reply.taskRaw = plan.profile.task.rawValue
                 reply.modelID = plan.model
-                let request = plan.profile.makeRequest(
+                var request = plan.profile.makeRequest(
                     history: conversation.chatMessages,
                     model: plan.model,
                     targetLanguage: plan.targetLanguage
                 )
+                if let suffix = plan.systemSuffix {
+                    request.system = [request.system, suffix].compactMap(\.self).joined(separator: "\n\n")
+                }
                 let loop = ToolLoop(provider: plan.provider, tools: plan.tools, policy: plan.policy)
                 for try await event in loop.run(request) {
                     switch event {
@@ -173,9 +224,11 @@ final class ChatController {
                     return step
                 }
             }
+            Self.markRunning(reply.id, false)
             conversation.updatedAt = .now
             try? context.save()
             tasks[key] = nil
+            if !cancelled && !Task.isCancelled { onFinished(conversation, reply, ContinuousClock.now - started) }
             if cancelled || Task.isCancelled {
                 if !(queues[key] ?? []).isEmpty { paused.insert(key) }
             } else {

@@ -189,7 +189,10 @@ extension OpenAICompatibleProvider {
         if let temperature = request.options.temperature { body["temperature"] = .number(temperature) }
         if let maxTokens = request.options.maxTokens { body["max_tokens"] = .number(Double(maxTokens)) }
         if let schema = request.responseFormat {
-            body["response_format"] = ["type": "json_schema", "json_schema": ["name": "response", "schema": schema]]
+            // "json" means plain JSON mode (Ollama's format: "json"); anything else is a schema.
+            body["response_format"] = schema == "json"
+                ? ["type": "json_object"]
+                : ["type": "json_schema", "json_schema": ["name": "response", "schema": schema]]
         }
         return .object(body)
     }

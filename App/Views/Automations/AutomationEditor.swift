@@ -1,4 +1,5 @@
 import Automation
+import Commands
 import Persistence
 import SwiftData
 import SwiftUI
@@ -44,17 +45,40 @@ struct AutomationEditor: View {
                     }
                 }
 
-                field("Command or prompt") {
+                field("Steps") {
                     VStack(alignment: .leading, spacing: 6) {
                         TextEditor(text: $automation.command)
-                            .font(.body)
+                            .font(.body.monospaced())
                             .scrollContentBackground(.hidden)
-                            .frame(minHeight: 70, maxHeight: 140)
+                            .frame(minHeight: 90, maxHeight: 180)
                             .padding(6)
                             .background(Theme.field)
-                        Text("A /command (e.g. one of your own) or a prompt. Runs in Chat mode on your local model; changes still need your approval.")
+                        Text("""
+                            One step per line: a /command (built-in or your own) or a prompt. Steps run in order in the same \
+                            Chat conversation on your local model; each waits for the one before. A failed step doesn't stop \
+                            the rest. Lines starting with # are comments. Changes still need your approval.
+                            """)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        let steps = AutomationSteps.parse(automation.command)
+                        if steps.count > 1 {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                        Text("\(index + 1).")
+                                            .monospacedDigit()
+                                            .foregroundStyle(.secondary)
+                                        Text(step).lineLimit(1)
+                                        if let error = stepProblem(step) {
+                                            Text(error).foregroundStyle(.orange)
+                                        }
+                                    }
+                                }
+                            }
+                            .font(.caption)
+                        } else if let only = steps.first, let error = stepProblem(only) {
+                            Text(error).font(.caption).foregroundStyle(.orange)
+                        }
                     }
                 }
 
@@ -75,6 +99,12 @@ struct AutomationEditor: View {
         }
         .background(Theme.canvas)
         .onChange(of: automation.command) { try? context.save() }
+    }
+
+    /// An unknown /command, caught while typing rather than at 7:30 in the morning.
+    private func stepProblem(_ step: String) -> String? {
+        guard let input = CommandInput(step) else { return nil }
+        return app.commands.registry.command(named: input.name) == nil ? "unknown command /\(input.name)" : nil
     }
 
     // MARK: Trigger

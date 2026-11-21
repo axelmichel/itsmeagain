@@ -10,6 +10,8 @@ enum AppData {
 
     static var store: URL { directory.appending(path: "ItsMeAgain.store") }
     static var knowledge: URL { directory.appending(path: "Knowledge", directoryHint: .isDirectory) }
+    /// The personal memory, readable JSON.
+    static var memory: URL { directory.appending(path: "Memory.json") }
     /// Empty working directory for Claude Code, so no project settings or CLAUDE.md apply.
     static var claudeCodeWorkdir: URL { directory.appending(path: "ClaudeCode", directoryHint: .isDirectory) }
 

@@ -12,24 +12,8 @@ public struct MailModel: Sendable {
         self.model = model
     }
 
-    /// One constrained-JSON completion without tools.
     func json<Value: Decodable>(_ type: Value.Type, system: String, user: String, schema: JSONValue, maxTokens: Int) async throws -> Value {
-        let request = ChatRequest(
-            model: model,
-            system: system,
-            messages: [.user(user)],
-            options: ChatOptions(temperature: 0, contextLength: 16_384, keepAlive: "10m", think: false, maxTokens: maxTokens),
-            responseFormat: schema
-        )
-        var output = ""
-        for try await event in provider.stream(request) {
-            if case .textDelta(let delta) = event { output += delta }
-        }
-        do {
-            return try JSONDecoder().decode(Value.self, from: Data(output.utf8))
-        } catch {
-            throw ProviderError.invalidResponse("expected JSON, got \(output.prefix(80))")
-        }
+        try await StructuredCompletion.json(type, provider: provider, model: model, system: system, user: user, schema: schema, maxTokens: maxTokens)
     }
 }
 

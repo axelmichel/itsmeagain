@@ -46,6 +46,28 @@ private struct GeneralSettings: View {
             }
 
             Section {
+                Toggle("Notify me when a long task is done", isOn: $app.notifyWhenDone)
+                if app.notifyWhenDone {
+                    Picker("For tasks longer than", selection: $app.notifyAfterSeconds) {
+                        Text("10 seconds").tag(10)
+                        Text("30 seconds").tag(30)
+                        Text("1 minute").tag(60)
+                        Text("3 minutes").tag(180)
+                    }
+                    Toggle("Show a preview of the answer", isOn: $app.notifyWithPreview)
+                }
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("""
+                    A macOS notification when a reply or command (e.g. /digest, /cleanup) finishes or fails — not while \
+                    you're looking at that conversation, not when you stopped it, and not for automations (they notify \
+                    on their own). Click it to open the conversation.
+                    """)
+                .foregroundStyle(.secondary)
+            }
+
+            Section {
                 LabeledContent("Shortcut") {
                     ShortcutRecorder(shortcut: $app.quickPanelShortcut) { app.suspendHotKey($0) }
                 }
@@ -85,7 +107,7 @@ private struct GeneralSettings: View {
             WebSearchSection()
         }
         .formStyle(.grouped)
-        .frame(height: 760)
+        .frame(height: 860)
     }
 }
 

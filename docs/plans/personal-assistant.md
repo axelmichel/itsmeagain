@@ -1,6 +1,6 @@
 # Plan: Personal assistant (iteration 2)
 
-Status: 2.1–2.2 done, 2.3 + mail cleanup/digest implemented (awaiting review) · Updated: 2026-11-21
+Status: 2.1–2.3 done, 2.4 implemented (awaiting review) · Updated: 2026-11-21
 
 ## 1. Goal
 
@@ -394,6 +394,28 @@ marked read and archived; topics AI / LLMs, Swift / iOS / macOS, Web / JS / Type
 **Acceptance:** extraction ignores tool output (test with a poisoned mail); duplicates merge;
 contradiction proposes an update; memory never appears in a request to a cloud provider (unit
 test); a remembered preference changes the brief's language/length.
+
+**Implemented (2026-11-21):**
+- `Memory` target: `MemoryBook` (match by embedding, else stopword-filtered word overlap →
+  duplicate / update / new; core profile by kind priority within ~1,800 chars; retrieval),
+  `MemoryExtractor` (user messages only, slash commands skipped), `SensitiveGuard`,
+  `MemoryContext` (nil for non-local providers), `recall` / `remember` tools, Markdown export.
+- Stored as readable JSON (`Application Support/ItsMeAgain/Memory.json`) instead of SwiftData:
+  small, inspectable, exportable, no migration.
+- Learning: every 2 min, Chat conversations idle ≥ 10 min, at most 3 per pass, only messages
+  written after memory was first started; skipped while a reply runs. Auto-accept by kind
+  (default: preferences, projects); people, routines, updates and sensitive items wait for review;
+  a notification opens the Memory tab.
+- Chat turns get the core profile + relevant items appended to the system prompt.
+- Commands `/remember`, `/forget`, `/memories [kind]`, `/whoami`; Memory tab (review, edit, kind,
+  forget / restore / delete, add, search, export); Settings → Assistant → Memory.
+- `StructuredCompletion`: gemma4 under a JSON-schema grammar sometimes runs away in whitespace
+  when an optional key follows or keys are reordered → all schema fields are required, runaways
+  are cut off, and retries use plain JSON mode with the schema in the prompt (6/6 and 4/4 stable).
+- Measured: three lasting facts extracted correctly from three messages in ≈ 3 s, nothing from
+  one-off questions; with the memory section the same question is answered in German in 195
+  instead of 1,791 characters.
+- Not yet: People → mail VIPs, vault mirror (with 2.5 Obsidian).
 
 ### Phase 2.5 — Obsidian
 

@@ -30,7 +30,8 @@ struct ContentView: View {
             }
             VStack(spacing: 0) {
                 DetailHeader(
-                    title: app.sidebarMode == .automations ? automation?.name ?? "Automations" : selection?.title ?? "ItsMeAgain",
+                    title: app.sidebarMode == .memory ? "Memory"
+                        : app.sidebarMode == .automations ? automation?.name ?? "Automations" : selection?.title ?? "ItsMeAgain",
                     showsSidebarControls: !sidebarVisible,
                     onToggleSidebar: toggleSidebar,
                     onNew: app.sidebarMode == .automations ? newAutomation : newConversation,
@@ -43,7 +44,9 @@ struct ContentView: View {
                     } : nil
                 )
                 .id(selection?.persistentModelID)
-                if app.sidebarMode == .automations {
+                if app.sidebarMode == .memory {
+                    MemoryPage()
+                } else if app.sidebarMode == .automations {
                     if let automation {
                         AutomationEditor(automation: automation, onDelete: deleteAutomation, onOpenConversation: openConversation)
                             .id(automation.persistentModelID)
@@ -53,23 +56,24 @@ struct ContentView: View {
                         } description: {
                             Text("Schedule a command or prompt, e.g. a summary every weekday morning.")
                         } actions: {
-                            Button("New Automation", action: newAutomation)
-                                .buttonStyle(.borderless)
-                            Button("Add Morning Brief (/brief, weekdays 07:30)") {
-                                newAutomation(name: "Morning brief", command: "/brief")
+                            // Stacked, so narrow windows don't push the templates out of view.
+                            VStack(spacing: 8) {
+                                Button("New Automation", action: newAutomation)
+                                Button("Add Morning Brief (/brief, weekdays 07:30)") {
+                                    newAutomation(name: "Morning brief", command: "/brief")
+                                }
+                                Button("Add Mail Cleanup (/cleanup, hourly)") {
+                                    newAutomation(name: "Mail cleanup", command: "/cleanup", trigger: .interval(minutes: 60), notify: false)
+                                }
+                                Button("Add Newsletter Digest (/digest, weekdays 08:00)") {
+                                    newAutomation(
+                                        name: "Newsletter digest", command: "/digest",
+                                        trigger: .daily(hour: 8, minute: 0, weekdays: AutomationTrigger.weekdaysOnly)
+                                    )
+                                }
                             }
                             .buttonStyle(.borderless)
-                            Button("Add Mail Cleanup (/cleanup, hourly)") {
-                                newAutomation(name: "Mail cleanup", command: "/cleanup", trigger: .interval(minutes: 60), notify: false)
-                            }
-                            .buttonStyle(.borderless)
-                            Button("Add Newsletter Digest (/digest, weekdays 08:00)") {
-                                newAutomation(
-                                    name: "Newsletter digest", command: "/digest",
-                                    trigger: .daily(hour: 8, minute: 0, weekdays: AutomationTrigger.weekdaysOnly)
-                                )
-                            }
-                            .buttonStyle(.borderless)
+                            .multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Theme.canvas)

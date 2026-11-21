@@ -29,22 +29,28 @@ struct ChatView: View {
         return all.isEmpty ? nil : all[min(matchIndex, all.count - 1)]
     }
 
+    @ViewBuilder
+    private var rows: some View {
+        let messages = conversation.orderedMessages
+        let current = currentMatch
+        ForEach(messages) { message in
+            MessageRow(
+                message: message,
+                isStreaming: isStreaming && message == messages.last,
+                onDelete: isStreaming ? nil : { withAnswer in delete(message, withAnswer: withAnswer) },
+                isCurrentMatch: message == current
+            )
+            .id(message.id)
+        }
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
-                    let messages = conversation.orderedMessages
-                    let current = currentMatch
-                    ForEach(messages) { message in
-                        MessageRow(
-                            message: message,
-                            isStreaming: isStreaming && message == messages.last,
-                            onDelete: isStreaming ? nil : { withAnswer in delete(message, withAnswer: withAnswer) },
-                            isCurrentMatch: message == current
-                        )
-                        .id(message.id)
-                    }
-                }
+                // Not lazy: a lazy stack inside the bottom-aligned, viewport-high frame below kept
+                // re-estimating row heights against the frame and looped forever (frozen app) when a
+                // tall card or a live progress line moved the content height across the viewport.
+                VStack(alignment: .leading, spacing: 18) { rows }
                 .padding(20)
                 .frame(maxWidth: 820)
                 // Short transcripts sit at the bottom but still fill the viewport, so no content edge
@@ -134,6 +140,10 @@ struct ChatView: View {
             if !text.hasPrefix("/") { suggestionsDismissed = false }
         }
         .navigationTitle(conversation.title)
+        .onAppear { app.visibleConversation = conversation.persistentModelID }
+        .onDisappear {
+            if app.visibleConversation == conversation.persistentModelID { app.visibleConversation = nil }
+        }
         .focusedSceneValue(\.activeConversation, conversation)
     }
 

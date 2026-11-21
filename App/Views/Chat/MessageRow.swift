@@ -12,6 +12,7 @@ struct MessageRow: View {
     var isCurrentMatch = false
     @Environment(\.searchHighlight) private var highlight
     @State private var hovered = false
+    @State private var confirmingDelete = false
 
     var body: some View {
         content
@@ -21,41 +22,54 @@ struct MessageRow: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                // Sits in the gap above the message, so it never covers text.
-                if hovered && !(isStreaming && message.content.isEmpty) {
-                    actionsMenu.offset(y: -17)
-                }
+                // Plain buttons in the gap above the message, always laid out and only faded in on hover:
+                // inserting and removing views (or a pull-down menu) on hover made SwiftUI loop and crash.
+                let visible = hovered && !(isStreaming && message.content.isEmpty)
+                hoverActions
+                    .offset(y: -17)
+                    .opacity(visible ? 1 : 0)
+                    .allowsHitTesting(visible)
             }
             .onHover { hovered = $0 }
-            .contextMenu { actions }
+            .confirmationDialog(
+                message.role == .user ? "Delete this question?" : "Delete this answer?",
+                isPresented: $confirmingDelete
+            ) {
+                if message.role == .user {
+                    Button("Delete Question and Answer", role: .destructive) { onDelete?(true) }
+                    Button("Delete Question Only", role: .destructive) { onDelete?(false) }
+                } else {
+                    Button("Delete Answer", role: .destructive) { onDelete?(false) }
+                }
+            }
     }
 
-    private var actionsMenu: some View {
-        Menu { actions } label: {
-            Image(systemName: "ellipsis")
-                .foregroundStyle(.secondary)
-                .frame(width: 22, height: 18)
-                .background(Theme.field)
+    private var hoverActions: some View {
+        HStack(spacing: 2) {
+            Button("Copy", systemImage: "doc.on.doc", action: copy)
+            if onDelete != nil {
+                Button("Delete…", systemImage: "trash") { confirmingDelete = true }
+            }
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Copy or delete")
+        .labelStyle(.iconOnly)
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 4)
+        .frame(height: 18)
+        .background(Theme.field)
     }
 
-    @ViewBuilder
-    private var actions: some View {
-        Button("Copy") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(message.content, forType: .string)
-        }
-        if let onDelete {
-            Divider()
-            if message.role == .user {
-                Button("Delete Question and Answer", role: .destructive) { onDelete(true) }
-                Button("Delete Question Only", role: .destructive) { onDelete(false) }
-            } else {
-                Button("Delete Answer", role: .destructive) { onDelete(false) }
+    private func copy() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(message.content, forType: .string)
+    }
+
+    /// Only on the text itself, never around attachments (they have their own menus).
+    private var textMenu: some View {
+        Group {
+            Button("Copy", action: copy)
+            if onDelete != nil {
+                Button("Delete…") { confirmingDelete = true }
             }
         }
     }
@@ -71,6 +85,7 @@ struct MessageRow: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(Theme.selection)
+                    .contextMenu { textMenu }
             }
         default:
             VStack(alignment: .leading, spacing: 8) {
@@ -95,6 +110,7 @@ struct MessageRow: View {
                     ProgressView().controlSize(.small)
                 } else {
                     MarkdownView(markdown: message.content)
+                        .contextMenu { textMenu }
                 }
                 ForEach(Array(message.attachments.enumerated()), id: \.offset) { index, attachment in
                     switch attachment {
@@ -104,6 +120,10 @@ struct MessageRow: View {
                         MailCleanupView(message: message, index: index, groups: groups)
                     case .calendar(let style, let date):
                         CalendarCardView(message: message, index: index, style: style, date: date)
+                    case .memories(let title, let ids):
+                        MemoryListView(title: title, ids: ids)
+                    case .appointments(let items):
+                        AppointmentListView(message: message, index: index, items: items)
                     }
                 }
                 if let error = message.errorText {

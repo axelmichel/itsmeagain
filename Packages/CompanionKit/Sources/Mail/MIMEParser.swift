@@ -8,6 +8,8 @@ public struct ParsedMail: Sendable, Equatable {
     public var headers: [String: String]
     public var plainText: String?
     public var html: String?
+    /// An iCalendar part (invitation), inline or attached.
+    public var calendar: String?
 
     /// Best readable text: HTML (with links kept as "text (url)") or plain text.
     public var readableText: String {
@@ -62,6 +64,12 @@ public enum MIMEParser {
                 if part.hasPrefix("--") { break }
                 let (partHeaders, partBody) = split(part.trimmingCharacters(in: CharacterSet(charactersIn: "\r\n")))
                 collect(headers: self.headers(partHeaders), body: partBody, into: &result, depth: depth + 1)
+            }
+            return
+        }
+        if type == "text/calendar" || type == "application/ics" {
+            if result.calendar == nil {
+                result.calendar = decodeBody(body, encoding: headers["content-transfer-encoding"], charset: parameter("charset", in: contentType))
             }
             return
         }
