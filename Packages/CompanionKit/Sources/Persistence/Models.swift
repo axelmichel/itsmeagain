@@ -3,6 +3,7 @@ import CompanionCore
 import PersonalData
 import Foundation
 import Jira
+import Learning
 import Mail
 import Obsidian
 import Routing
@@ -162,6 +163,16 @@ public enum MessageAttachment: Codable, Sendable, Hashable {
     case mailTriage([TriageItem])
     /// Jira tickets as cards (read-only).
     case jiraIssues([JiraIssue])
+    /// Videos of the YouTube playlist to pick for notes.
+    case ytPlaylist([PlaylistVideo])
+    /// Where notes in Clippings/ should go, editable, applied on confirmation.
+    case sortPlan([SortProposal])
+    /// A checked text with its errors highlighted and a corrected version.
+    case spelling(SpellingResult)
+    /// Flashcards (front/back, flippable).
+    case flashcards([Flashcard])
+    /// A /learn session (cards are read live from the deck).
+    case learnSession(LearnSession)
 
     public var textForModel: String {
         switch self {
@@ -177,6 +188,16 @@ public enum MessageAttachment: Codable, Sendable, Hashable {
                 "- [\(item.category.rawValue)] \(item.message.subject) — \(item.message.senderName)"
                     + (item.ask.map { ": \($0)" } ?? "") + (item.handled.map { " (\($0.rawValue))" } ?? "") + " (id \(item.message.id))"
             }.joined(separator: "\n")
+        case .ytPlaylist(let videos):
+            return "Playlist:\n" + videos.map { "- \($0.title) (\($0.isNew ? "new" : "already in the vault"))" }.joined(separator: "\n")
+        case .spelling(let result):
+            return "Corrected (\(result.language)): \(result.corrected)\nIssues: " + result.issues.map { "\($0.text) → \($0.correction)" }.joined(separator: "; ")
+        case .flashcards(let cards):
+            return cards.map { "Flashcard [\($0.language)] \($0.front) = \($0.back)" }.joined(separator: "\n")
+        case .learnSession(let session):
+            return "Learning session: \(session.grades.count) of \(session.cardIDs.count) cards answered."
+        case .sortPlan(let proposals):
+            return "Sorting plan:\n" + proposals.map { "- \($0.title) → \($0.folder ?? "unsure") [\($0.status.rawValue)]" }.joined(separator: "\n")
         case .jiraIssues(let issues):
             return issues.map(JiraFormatter.detail).joined(separator: "\n\n")
         case .vaultTasks(let title, let tasks):

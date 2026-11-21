@@ -100,3 +100,36 @@ extension NoteStore {
         return String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
     }
 }
+
+extension NoteStore {
+    /// /planday into the daily note: timed tasks as Day Planner entries (30 min), the others as
+    /// checkboxes in a "Todos" section. Lines already there aren't added again.
+    @discardableResult
+    public func addTodos(_ todos: [(title: String, at: Date?)], date: Date = .now, calendar: Calendar = .current) throws -> String {
+        let timed = todos.compactMap { todo in todo.at.map { DayPlanEntry(start: $0, end: $0.addingTimeInterval(30 * 60), title: todo.title) } }
+        var path = settings.dailyNotePath(for: date, calendar: calendar)
+        if !timed.isEmpty { path = try updateDailyNote(plan: timed, brief: nil, date: date, calendar: calendar) }
+
+        let untimed = todos.filter { $0.at == nil }.map { "- [ ] \($0.title)" }
+        guard !untimed.isEmpty else { return path }
+        let url = try resolve(path)
+        let existing = try? String(contentsOf: url, encoding: .utf8)
+        var lines = (existing ?? "").replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        if lines == [""] { lines = [] }
+        let heading = "## Todos"
+        if let headingIndex = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == heading }) {
+            let end = Self.sectionEnd(lines, after: headingIndex, anyLevel: true)
+            let present = Set(lines[(headingIndex + 1)..<end].map { $0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "- [x] ", with: "- [ ] ") })
+            var insertAt = end
+            while insertAt > headingIndex + 1, lines[insertAt - 1].trimmingCharacters(in: .whitespaces).isEmpty { insertAt -= 1 }
+            lines.insert(contentsOf: untimed.filter { !present.contains($0) }, at: insertAt)
+        } else {
+            if let last = lines.last, !last.isEmpty { lines.append("") }
+            lines += [heading, ""] + untimed
+        }
+        var content = lines.joined(separator: "\n")
+        if !content.hasSuffix("\n") { content += "\n" }
+        try write(path, content: content, expecting: existing)
+        return path
+    }
+}

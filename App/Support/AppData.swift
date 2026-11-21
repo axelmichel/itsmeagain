@@ -14,6 +14,8 @@ enum AppData {
     static var memory: URL { directory.appending(path: "Memory.json") }
     /// News feeds and the last 30 days of items.
     static var news: URL { directory.appending(path: "News.json") }
+    /// Vocabulary cards with their review schedule.
+    static var flashcards: URL { directory.appending(path: "Flashcards.json") }
     /// Empty working directory for Claude Code, so no project settings or CLAUDE.md apply.
     static var claudeCodeWorkdir: URL { directory.appending(path: "ClaudeCode", directoryHint: .isDirectory) }
 

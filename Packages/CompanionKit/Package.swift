@@ -20,6 +20,8 @@ let package = Package(
         .library(name: "Obsidian", targets: ["Obsidian"]),
         .library(name: "News", targets: ["News"]),
         .library(name: "Jira", targets: ["Jira"]),
+        .library(name: "Weather", targets: ["Weather"]),
+        .library(name: "Learning", targets: ["Learning"]),
     ],
     dependencies: [
         .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.14.0"),
@@ -39,10 +41,12 @@ let package = Package(
         .target(name: "Obsidian", dependencies: ["CompanionCore", "Tools"]),
         .target(name: "News", dependencies: ["CompanionCore", "Tools", "SwiftSoup"]),
         .target(name: "Jira", dependencies: ["CompanionCore", "Tools"]),
-        .target(name: "Persistence", dependencies: ["CompanionCore", "Routing", "Tools", "Automation", "PersonalData", "Mail", "Obsidian", "Jira"]),
+        .target(name: "Weather"),
+        .target(name: "Learning", dependencies: ["CompanionCore"]),
+        .target(name: "Persistence", dependencies: ["CompanionCore", "Routing", "Tools", "Automation", "PersonalData", "Mail", "Obsidian", "Jira", "Learning"]),
         .testTarget(
             name: "CompanionKitTests",
-            dependencies: ["CompanionCore", "Providers", "Persistence", "Routing", "AppleIntelligence", "Tools", "Knowledge", "Commands", "Automation", "PersonalData", "Mail", "Memory", "Obsidian", "News", "Jira"]
+            dependencies: ["CompanionCore", "Providers", "Persistence", "Routing", "AppleIntelligence", "Tools", "Knowledge", "Commands", "Automation", "PersonalData", "Mail", "Memory", "Obsidian", "News", "Jira", "Weather", "Learning"]
         ),
     ]
 )

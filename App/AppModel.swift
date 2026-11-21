@@ -90,6 +90,17 @@ final class AppModel {
     let memory = MemoryModel()
     let news = NewsModel()
     let jira = JiraModel()
+    let weather = WeatherModel()
+    let learning = LearningModel()
+
+    /// The right panel: shown or not, and which widgets (commands) are hooked into it.
+    var showsPanel: Bool = UserDefaults.standard.bool(forKey: "showsPanel") {
+        didSet { UserDefaults.standard.set(showsPanel, forKey: "showsPanel") }
+    }
+    var panelWidgets: [PanelWidget] = (UserDefaults.standard.stringArray(forKey: "panelWidgets") ?? ["calendar", "reminders", "weather"])
+        .compactMap(PanelWidget.init(rawValue:)) {
+        didSet { UserDefaults.standard.set(panelWidgets.map(\.rawValue), forKey: "panelWidgets") }
+    }
     @ObservationIgnored private(set) var scheduler: AutomationScheduler?
 
     enum SidebarMode: String { case chats, automations, memory }
@@ -220,6 +231,16 @@ final class AppModel {
 
     var dailyNoteWithoutAsking: Bool = UserDefaults.standard.bool(forKey: "dailyNoteWithoutAsking") {
         didSet { UserDefaults.standard.set(dailyNoteWithoutAsking, forKey: "dailyNoteWithoutAsking") }
+    }
+
+    /// /planday: which Reminders list the tasks go into ("" = your default list).
+    var planDayList: String = UserDefaults.standard.string(forKey: "planDayList") ?? "" {
+        didSet { UserDefaults.standard.set(planDayList, forKey: "planDayList") }
+    }
+
+    /// /planday: also write the tasks into today's daily note (off: tick them off in one place only).
+    var planDayToDailyNote: Bool = UserDefaults.standard.bool(forKey: "planDayToDailyNote") {
+        didSet { UserDefaults.standard.set(planDayToDailyNote, forKey: "planDayToDailyNote") }
     }
 
     /// After /brief: today's events into the Day Planner section, the brief into "Morning brief".
@@ -433,6 +454,7 @@ final class AppModel {
             return (newsletterTopicList, extra)
         }
         news.start()
+        Task { await learning.load() }
         vaultIndex.vaults = { [unowned self] in detectedVaults.filter(isVaultEnabled) }
         vaultIndex.embedder = { [unowned self] in (knowledge.embedder, knowledge.embeddingModel) }
         vaultIndex.start()

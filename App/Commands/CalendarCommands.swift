@@ -1,14 +1,16 @@
 import Commands
 import Foundation
+import Obsidian
 import Persistence
 import PersonalData
 import SwiftData
 
 /// Native calendar commands: instant listings straight from EventKit, no model involved.
 extension AppModel {
-    static let calendarHandlers: Set<String> = ["today", "tomorrow", "week", "agenda", "cal", "free", "reminders"]
+    static let calendarHandlers: Set<String> = ["today", "tomorrow", "week", "agenda", "cal", "free", "reminders", "planday"]
 
     func runCalendarCommand(_ handler: String, input: CommandInput, text: String, in conversation: Conversation, context: ModelContext) -> CommandOutcome {
+        if handler == "planday" { return runPlanDay(input: input, text: text, in: conversation, context: context) }
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
         let day = { (offset: Int) in calendar.date(byAdding: .day, value: offset, to: today)! }
@@ -80,6 +82,56 @@ extension AppModel {
                     reply.attachments = attachments
                 }
             } catch {
+                reply.errorText = error.localizedDescription
+            }
+        }
+        return .handled
+    }
+
+    /// /planday: every line becomes a reminder (today, or the day/time written in the line),
+    /// shown as a checklist; optionally also in today's daily note.
+    private func runPlanDay(input: CommandInput, text: String, in conversation: Conversation, context: ModelContext) -> CommandOutcome {
+        let items = PlanDayParser.parse(input.arguments)
+        guard !items.isEmpty else {
+            return .failed("Write the tasks after /planday, one per line (Shift-Return for a new line), e.g. “- 14:00 Call Tom”.")
+        }
+        guard !chat.isStreaming(conversation) else { return .failed("Wait for the current reply to finish.") }
+        if conversation.messages.isEmpty { conversation.title = "Plan for \(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide)))" }
+        conversation.append(role: .user, content: text, task: .chat)
+        let reply = conversation.append(role: .assistant, content: "_Creating \(items.count) reminders…_", task: .chat)
+        try? context.save()
+        let list = planDayList.isEmpty ? nil : planDayList
+        let toNote = planDayToDailyNote ? vaults.main : nil
+
+        chat.run(in: conversation, context: context) { [self] in
+            do {
+                if !EventKitStore.remindersAuthorized { _ = await EventKitStore.shared.requestAccess() }
+                guard EventKitStore.remindersAuthorized else { throw PersonalDataError.accessDenied("your reminders") }
+                var created: [ReminderItem] = []
+                var failures: [String] = []
+                for item in items {
+                    do {
+                        created.append(try await EventKitStore.shared.createReminder(
+                            title: item.title, due: item.at ?? item.day, dueHasTime: item.at != nil, list: list
+                        ))
+                    } catch {
+                        failures.append("\(item.title): \(error.localizedDescription)")
+                    }
+                }
+                let timed = items.filter { $0.at != nil }.count
+                var lines = ["**\(created.count) \(created.count == 1 ? "task" : "tasks")** planned"
+                    + (created.first.map { " in \($0.list)" } ?? "") + (timed > 0 ? ", \(timed) with a time (you'll get an alert)" : "") + "."]
+                if !failures.isEmpty { lines.append("Not created: " + failures.joined(separator: "; ")) }
+                if let toNote {
+                    let todos = items.filter { Calendar.current.isDateInToday($0.day) }.map { (title: $0.title, at: $0.at) }
+                    if !todos.isEmpty {
+                        do { lines.append("Also in today's daily note: \(try toNote.addTodos(todos))") } catch { lines.append("Daily note not updated: \(error.localizedDescription)") }
+                    }
+                }
+                reply.content = lines.joined(separator: "\n")
+                reply.attachments = [.reminders(title: "Your plan", items: created.sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) })]
+            } catch {
+                reply.content = ""
                 reply.errorText = error.localizedDescription
             }
         }

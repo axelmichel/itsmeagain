@@ -9,7 +9,8 @@ import SwiftUI
 /// time the card shows; only the selected day is stored. Adding is the user's own click, so no
 /// approval card.
 struct CalendarCardView: View {
-    let message: StoredMessage
+    /// The chat message the card belongs to (its selected day is saved there); nil in the side panel.
+    let message: StoredMessage?
     let index: Int
     let style: CalendarCardStyle
     @Environment(\.modelContext) private var context
@@ -25,7 +26,7 @@ struct CalendarCardView: View {
 
     private let calendar = Calendar.current
 
-    init(message: StoredMessage, index: Int, style: CalendarCardStyle, date: Date) {
+    init(message: StoredMessage?, index: Int, style: CalendarCardStyle, date: Date) {
         self.message = message
         self.index = index
         self.style = style
@@ -249,6 +250,7 @@ struct CalendarCardView: View {
     }
 
     private func store() {
+        guard let message else { return }
         var attachments = message.attachments
         guard attachments.indices.contains(index) else { return }
         attachments[index] = .calendar(style: style, date: selected)

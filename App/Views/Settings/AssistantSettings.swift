@@ -2,6 +2,7 @@ import AppKit
 import UniformTypeIdentifiers
 import Mail
 import Jira
+import Weather
 import Memory
 import News
 import Obsidian
@@ -58,10 +59,16 @@ struct AssistantSettings: View {
                 ObsidianSettingsSection()
                 NewsSettingsSection()
                 JiraSettingsSection()
+                WeatherSettingsSection()
+                LearningSettingsSection()
                 MemorySettingsSection()
 
             Section {
                 Toggle("Create reminders without asking", isOn: $app.remindersWithoutAsking)
+                Picker("/planday puts tasks into", selection: $app.planDayList) {
+                    Text("Default list").tag("")
+                    ForEach(lists) { Text($0.title).tag($0.title) }
+                }
             } header: {
                 Text("Approvals")
             } footer: {
@@ -305,6 +312,7 @@ private struct ObsidianSettingsSection: View {
             }
             Toggle("Add to the daily note without asking", isOn: $app.dailyNoteWithoutAsking)
             Toggle("Write the morning brief and today's events into the daily note", isOn: $app.briefToDailyNote)
+            Toggle("/planday also writes the tasks into today's daily note", isOn: $app.planDayToDailyNote)
             ForEach(enabled) { vault in
                 let status = app.vaultIndex.status[vault.path]
                 LabeledContent("Search index · \(vault.name)") {
@@ -544,5 +552,82 @@ private struct ImportantSendersEditor: View {
     private func add() {
         app.addImportantSender(newSender)
         newSender = ""
+    }
+}
+
+private struct WeatherSettingsSection: View {
+    @Environment(AppModel.self) private var app
+    @State private var query = ""
+    @State private var results: [WeatherPlace] = []
+    @State private var message: String?
+
+    var body: some View {
+        Section {
+            if let place = app.weather.place {
+                HStack {
+                    Text("\(place.name), \(place.country)")
+                    Spacer()
+                    Button("Remove") { app.weather.choose(nil) }
+                }
+            }
+            HStack {
+                TextField("Search a place", text: $query, prompt: Text("e.g. Morlaix"))
+                    .onSubmit(search)
+                Button("Search", action: search).disabled(query.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            ForEach(results, id: \.self) { place in
+                Button("\(place.name), \(place.country)") {
+                    app.weather.choose(place)
+                    results = []
+                    query = ""
+                }
+                .buttonStyle(.borderless)
+            }
+            if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
+        } header: {
+            Text("Weather")
+        } footer: {
+            Text("""
+                From Open-Meteo (free, no account; non-commercial use). Only the chosen place's coordinates are sent — \
+                not your Mac's location. Used by /weather and the Weather widget in the right panel.
+                """)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private func search() {
+        let name = query
+        Task {
+            do {
+                results = try await app.weather.search(name)
+                message = results.isEmpty ? "No place found." : nil
+            } catch {
+                message = error.localizedDescription
+            }
+        }
+    }
+}
+
+private struct LearningSettingsSection: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        @Bindable var learning = app.learning
+        Section {
+            TextField("Explain cards and corrections in", text: $learning.explainIn, prompt: Text("e.g. German"))
+            let languages = learning.deck.languages
+            LabeledContent("Cards") {
+                Text(languages.isEmpty ? "none yet" : languages.map { language in
+                    "\(language) \(learning.deck.cards.filter { $0.language == language }.count)"
+                }.joined(separator: " · "))
+                .foregroundStyle(.secondary)
+            }
+            Button("Show Cards File in Finder") { NSWorkspace.shared.activateFileViewerSelecting([AppData.flashcards]) }
+        } header: {
+            Text("Languages")
+        } footer: {
+            Text("/spelling checks a text (macOS spell checker + your local model), /flashcard makes a card, /learn reviews due cards first. Everything stays on this Mac.")
+                .foregroundStyle(.secondary)
+        }
     }
 }

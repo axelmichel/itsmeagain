@@ -130,6 +130,16 @@ struct MessageRow: View {
                         TriageView(message: message, index: index, items: items)
                     case .jiraIssues(let issues):
                         JiraIssueList(issues: issues)
+                    case .ytPlaylist(let videos):
+                        PlaylistView(message: message, index: index, videos: videos)
+                    case .sortPlan(let proposals):
+                        SortPlanView(message: message, index: index, proposals: proposals)
+                    case .spelling(let result):
+                        SpellingView(result: result)
+                    case .flashcards(let cards):
+                        VStack(alignment: .leading, spacing: 8) { ForEach(cards) { FlashcardView(card: $0) } }
+                    case .learnSession(let session):
+                        LearnSessionView(message: message, index: index, session: session)
                     }
                 }
                 if let error = message.errorText {

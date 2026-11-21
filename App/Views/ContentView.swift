@@ -101,6 +101,10 @@ struct ContentView: View {
                 }
             }
         }
+        .inspector(isPresented: Binding(get: { app.showsPanel }, set: { app.showsPanel = $0 })) {
+            SidePanel()
+                .inspectorColumnWidth(min: 260, ideal: 320, max: 460)
+        }
         // The title bar is hidden; the header rows take its place under the traffic lights.
         .ignoresSafeArea(.container, edges: .top)
         .background {
@@ -108,6 +112,7 @@ struct ContentView: View {
             Group {
                 Button("New Chat", action: newConversation).keyboardShortcut("n")
                 Button("Toggle Sidebar", action: toggleSidebar).keyboardShortcut("s", modifiers: [.command, .control])
+                Button("Toggle Panel") { app.showsPanel.toggle() }.keyboardShortcut("0", modifiers: [.command, .option])
             }
             .hidden()
         }
@@ -221,6 +226,7 @@ struct DetailHeader: View {
                 }
             }
             Spacer()
+            HeaderButton(app.showsPanel ? "Hide Panel (⌥⌘0)" : "Show Panel (⌥⌘0)", systemImage: "sidebar.right") { app.showsPanel.toggle() }
         }
         .padding(.horizontal, 12)
         .headerBar()

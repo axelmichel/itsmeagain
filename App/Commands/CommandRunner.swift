@@ -146,6 +146,23 @@ extension AppModel {
         case "digest":
             return runDigestCommand(input: input, text: text, in: conversation, context: context)
 
+        case "spelling", "flashcard", "learn":
+            return runLearningCommand(handler, input: input, text: text, in: conversation, context: context)
+
+        case "weather":
+            guard weather.place != nil else { return .failed("Choose your place first: Settings → Assistant → Weather.") }
+            guard !chat.isStreaming(conversation) else { return .failed("Wait for the current reply to finish.") }
+            if conversation.messages.isEmpty { conversation.title = text }
+            conversation.append(role: .user, content: text, task: conversation.task)
+            let reply = conversation.append(role: .assistant, content: "_Checking the weather…_", task: conversation.task)
+            try? context.save()
+            let weather = weather
+            chat.run(in: conversation, context: context) {
+                await weather.refresh()
+                reply.content = weather.markdown
+            }
+            return .handled
+
         case "important":
             let sender = input.arguments.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !sender.isEmpty else { return .failed("Usage: /important tom@company.de (or @company.de, or a name)") }
@@ -156,6 +173,9 @@ extension AppModel {
                 + "All important senders: \(importantSendersList.joined(separator: ", ")). Remove one in Settings → Assistant → Mail.", task: .chat)
             try? context.save()
             return .handled
+
+        case "yt-playlist", "yt", "einordnen":
+            return runClippingCommand(handler, input: input, text: text, in: conversation, context: context)
 
         case "jira", "myjira":
             return runJiraCommand(handler, input: input, text: text, in: conversation, context: context)

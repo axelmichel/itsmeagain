@@ -66,7 +66,12 @@ public struct CommandRegistry: Sendable {
             scope: .personal,
             aliases: ["add"]
         ),
+        CommandSpec(name: "weather", summary: "Weather now and the next hours", kind: .native(handler: "weather"), scope: .general),
         CommandSpec(name: "free", summary: "Free time in your calendar", argumentHint: "<30m|1h> [day]", kind: .native(handler: "free"), scope: .personal),
+        CommandSpec(
+            name: "planday", summary: "Plan the day: a list of tasks → reminders to tick off", argumentHint: "one task per line (14:00 … sets a time)",
+            kind: .native(handler: "planday"), scope: .personal, aliases: ["plan"]
+        ),
         CommandSpec(name: "reminders", summary: "Open reminders, overdue first", argumentHint: "[list]", kind: .native(handler: "reminders"), scope: .personal),
         CommandSpec(
             name: "remind", summary: "Create a reminder", argumentHint: "<what> [when]",
@@ -117,7 +122,17 @@ public struct CommandRegistry: Sendable {
         CommandSpec(name: "todos", summary: "Open tasks from your notes", argumentHint: "[due | #tag | vault]", kind: .native(handler: "todos"), scope: .personal),
         CommandSpec(name: "done", summary: "Tick off a task from your notes", argumentHint: "<words>", kind: .native(handler: "done"), scope: .personal),
         CommandSpec(name: "find", summary: "Search your notes by meaning and words", argumentHint: "[@vault] <words>", kind: .native(handler: "find"), scope: .personal),
+        CommandSpec(name: "yt-playlist", summary: "Your YouTube playlist: pick videos to turn into notes", kind: .native(handler: "yt-playlist"), scope: .personal),
+        CommandSpec(name: "yt", summary: "Notes from YouTube videos (then sorting)", argumentHint: "<url> [url …]", kind: .native(handler: "yt"), scope: .personal),
+        CommandSpec(name: "einordnen", summary: "Sort notes from Clippings/ into topic folders (you confirm)", kind: .native(handler: "einordnen"), scope: .personal, aliases: ["sort"]),
         CommandSpec(name: "dayplan", summary: "Today's events into the daily note (Day Planner)", kind: .native(handler: "dayplan"), scope: .personal),
+    ]
+
+    /// Languages: checking your text, vocabulary cards, learning them.
+    public static let learning: [CommandSpec] = [
+        CommandSpec(name: "spelling", summary: "Check a text you wrote: errors highlighted, corrected version", argumentHint: "<text>", kind: .native(handler: "spelling"), scope: .general, aliases: ["check"]),
+        CommandSpec(name: "flashcard", summary: "Make a vocabulary card and keep it", argumentHint: "<word> [language]", kind: .native(handler: "flashcard"), scope: .general, aliases: ["card"]),
+        CommandSpec(name: "learn", summary: "Learn your cards (due first, then new)", argumentHint: "[number] [language]", kind: .native(handler: "learn"), scope: .general),
     ]
 
     /// Personal memory (Chat mode, local models only).

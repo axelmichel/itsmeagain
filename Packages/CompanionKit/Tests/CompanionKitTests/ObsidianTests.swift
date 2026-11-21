@@ -324,3 +324,29 @@ struct VaultIndexLiveTests {
         #expect(again.indexed == 0 && again.unchanged == summary.indexed)
     }
 }
+
+@Suite struct PlanDayNoteTests {
+    @Test func timedToDayPlannerUntimedToTodosNoDuplicates() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        let date = calendar.date(from: DateComponents(year: 2026, month: 11, day: 23, hour: 8))!
+        let at14 = calendar.date(bySettingHour: 14, minute: 0, second: 0, of: date)!
+        let vault = try FixtureVault(files: [:])
+        defer { vault.remove() }
+        let todos: [(title: String, at: Date?)] = [("Task 1", nil), ("Call Tom", at14), ("Task 2", nil)]
+        try vault.store.addTodos(todos, date: date, calendar: calendar)
+        try vault.store.addTodos([("Task 1", nil), ("Task 3", nil)], date: date, calendar: calendar)
+        #expect(vault.text("2026-11-23.md") == """
+            # Day planner
+
+            - [ ] 14:00 - 14:30 Call Tom
+
+            ## Todos
+
+            - [ ] Task 1
+            - [ ] Task 2
+            - [ ] Task 3
+
+            """)
+    }
+}
