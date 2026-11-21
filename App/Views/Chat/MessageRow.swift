@@ -128,6 +128,8 @@ struct MessageRow: View {
                         VaultTaskListView(message: message, index: index, title: title, tasks: tasks)
                     case .mailTriage(let items):
                         TriageView(message: message, index: index, items: items)
+                    case .jiraIssues(let issues):
+                        JiraIssueList(issues: issues)
                     }
                 }
                 if let error = message.errorText {

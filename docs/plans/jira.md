@@ -1,6 +1,6 @@
 # Jira (read-only, several sites)
 
-Status: planned · Created: 2026-11-21
+Status: implemented (awaiting review; untested against a real site) · Created: 2026-11-21
 
 ## Goal
 
@@ -104,3 +104,17 @@ About one day: client + converters + directory (half), tools/commands/cards/sett
 1. Site URLs and whether each is Cloud or Data Center.
 2. Scoped (read-only) tokens available on your sites?
 3. Which statuses count as "open" for `/myjira` (default: status category ≠ Done)?
+
+## Implemented (2026-11-21)
+
+- `Jira` target: `JiraClient` (GET only; https only; Basic auth on Cloud, Bearer on Data Center;
+  no redirects to other hosts; server type detected from `serverInfo`), ADF and wiki-markup to
+  text, `JiraDirectory` (key → site by project prefix, all sites when unknown; parallel search;
+  per-site failures reported), `JiraQuery` (filters → JQL, no model-written JQL), tools
+  `jira_issue` / `jira_search` (private, untrusted-wrapped).
+- App: Settings → Assistant → Jira (add site with name, address, email, token; Test detects
+  Cloud/Data Center, checks the token and loads project keys; enable/remove), tokens in the
+  Keychain (`jira.<id>`); `/jira KEY…` as ticket cards, `/jira words` and `/myjira [site]` as
+  lists grouped by site and status.
+- Tested with stub servers (Cloud ADF + Basic, Data Center wiki + Bearer, errors, routing,
+  JQL escaping). Not yet: ticket keys in mail linked with status.

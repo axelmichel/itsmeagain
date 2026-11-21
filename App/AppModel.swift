@@ -1,6 +1,7 @@
 import AppleIntelligence
 import CompanionCore
 import Foundation
+import Jira
 import Knowledge
 import Mail
 import Memory
@@ -88,6 +89,7 @@ final class AppModel {
     @ObservationIgnored let notifier = Notifier()
     let memory = MemoryModel()
     let news = NewsModel()
+    let jira = JiraModel()
     @ObservationIgnored private(set) var scheduler: AutomationScheduler?
 
     enum SidebarMode: String { case chats, automations, memory }
@@ -120,6 +122,19 @@ final class AppModel {
     /// Comma- or line-separated addresses / names.
     var vipSenders: String = UserDefaults.standard.string(forKey: "vipSenders") ?? "" {
         didSet { UserDefaults.standard.set(vipSenders, forKey: "vipSenders") }
+    }
+
+    /// The important senders typed in Settings or with /important, one per entry.
+    var importantSendersList: [String] { Self.split(vipSenders) }
+
+    func addImportantSender(_ sender: String) {
+        let value = sender.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, !importantSendersList.contains(where: { $0.caseInsensitiveCompare(value) == .orderedSame }) else { return }
+        vipSenders = (importantSendersList + [value]).joined(separator: ", ")
+    }
+
+    func removeImportantSender(_ sender: String) {
+        vipSenders = importantSendersList.filter { $0 != sender }.joined(separator: ", ")
     }
 
     var newsletterSenders: String = UserDefaults.standard.string(forKey: "newsletterSenders") ?? "" {
@@ -246,6 +261,10 @@ final class AppModel {
         tools += ObsidianToolbox.tools(vaults)
         let news = news
         tools.append(NewsTool(ranking: news.ranking) { await MainActor.run { news.library.items } })
+        if jira.isConfigured {
+            let directory = jira.directory
+            tools += [JiraIssueTool(directory: directory), JiraSearchTool(directory: directory)]
+        }
         return tools
     }
 

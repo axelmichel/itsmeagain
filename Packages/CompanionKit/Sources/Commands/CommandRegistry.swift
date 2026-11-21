@@ -99,6 +99,12 @@ public struct CommandRegistry: Sendable {
         ),
     ]
 
+    /// Jira (read-only, several sites).
+    public static let jira: [CommandSpec] = [
+        CommandSpec(name: "jira", summary: "A ticket (or search your Jira sites)", argumentHint: "<KEY-123 … | words>", kind: .native(handler: "jira"), scope: .personal),
+        CommandSpec(name: "myjira", summary: "Your open Jira tickets across all sites", argumentHint: "[site]", kind: .native(handler: "myjira"), scope: .personal),
+    ]
+
     /// News from the user's feeds (public data, but it runs in Chat with the other personal commands).
     public static let news: [CommandSpec] = [
         CommandSpec(name: "news", summary: "Today's news for your interests", argumentHint: "[topic]", kind: .native(handler: "news"), scope: .personal),
@@ -128,6 +134,10 @@ public struct CommandRegistry: Sendable {
         CommandSpec(
             name: "appointments", summary: "Find appointments in last week's mail, check your time, add them", argumentHint: "[days, max 7]",
             kind: .native(handler: "appointments"), scope: .personal
+        ),
+        CommandSpec(
+            name: "important", summary: "Add a sender to your important senders (notify on new mail)", argumentHint: "<address | @domain | name>",
+            kind: .native(handler: "important"), scope: .personal
         ),
         CommandSpec(
             name: "watched", summary: "Unread mail from your important senders, by address",

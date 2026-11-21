@@ -146,6 +146,20 @@ extension AppModel {
         case "digest":
             return runDigestCommand(input: input, text: text, in: conversation, context: context)
 
+        case "important":
+            let sender = input.arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !sender.isEmpty else { return .failed("Usage: /important tom@company.de (or @company.de, or a name)") }
+            addImportantSender(sender)
+            if conversation.messages.isEmpty { conversation.title = text }
+            conversation.append(role: .user, content: text, task: .chat)
+            conversation.append(role: .assistant, content: "**\(sender)** is now an important sender: new mail notifies you and always comes first. "
+                + "All important senders: \(importantSendersList.joined(separator: ", ")). Remove one in Settings → Assistant → Mail.", task: .chat)
+            try? context.save()
+            return .handled
+
+        case "jira", "myjira":
+            return runJiraCommand(handler, input: input, text: text, in: conversation, context: context)
+
         case "dayplan":
             guard vaults.main != nil else { return .failed("No Obsidian vault is enabled. Choose one in Settings → Assistant → Obsidian.") }
             guard !chat.isStreaming(conversation) else { return .failed("Wait for the current reply to finish.") }

@@ -1,6 +1,7 @@
 import AppKit
 import UniformTypeIdentifiers
 import Mail
+import Jira
 import Memory
 import News
 import Obsidian
@@ -56,6 +57,7 @@ struct AssistantSettings: View {
                 if app.mailEnabled { MailRulesSection() }
                 ObsidianSettingsSection()
                 NewsSettingsSection()
+                JiraSettingsSection()
                 MemorySettingsSection()
 
             Section {
@@ -132,10 +134,7 @@ private struct MailSettingsSection: View {
                         }
                     ))
                 }
-                LabeledContent("Important senders") {
-                    TextField("tom@company.de, Anna Weber", text: $app.vipSenders, axis: .vertical)
-                        .lineLimit(1...3)
-                }
+                ImportantSendersEditor()
                 Toggle("Check new mail in the background", isOn: $app.mailWatchEnabled)
                 if app.mailWatchEnabled {
                     Toggle("Notify me about mail from important senders", isOn: $app.notifyImportantMail)
@@ -425,5 +424,125 @@ private struct NewsSettingsSection: View {
         guard panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
         let added = app.news.importOPML(data)
         message = added == 0 ? "No new feeds in that file." : "Imported \(added) feeds."
+    }
+}
+
+private struct JiraSettingsSection: View {
+    @Environment(AppModel.self) private var app
+    @State private var name = ""
+    @State private var url = ""
+    @State private var email = ""
+    @State private var token = ""
+    @State private var messages: [UUID: String] = [:]
+    @State private var adding = false
+
+    var body: some View {
+        let jira = app.jira
+        Section {
+            ForEach(jira.connections) { connection in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Toggle(isOn: Binding(
+                            get: { connection.enabled },
+                            set: { on in var updated = connection; updated.enabled = on; jira.update(updated, token: nil) }
+                        )) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(connection.name)
+                                Text(connection.baseURL).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if jira.testing.contains(connection.id) { ProgressView().controlSize(.small) }
+                        Button("Test") { Task { messages[connection.id] = await jira.test(connection.id) } }
+                            .disabled(jira.testing.contains(connection.id))
+                        Button("Remove", systemImage: "minus.circle") { jira.remove(connection.id) }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.borderless)
+                    }
+                    if let message = messages[connection.id] ?? connection.lastError {
+                        Text(message).font(.caption).foregroundStyle(connection.lastError == nil ? Color.secondary : Color.orange)
+                    } else if !connection.projectKeys.isEmpty {
+                        Text("\(connection.kind == .cloud ? "Cloud" : "Data Center") · \(connection.projectKeys.count) projects")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if !jira.hasToken(connection) {
+                        Text("No token saved.").font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }
+            DisclosureGroup("Add a Jira site", isExpanded: $adding) {
+                TextField("Name", text: $name, prompt: Text("e.g. Work"))
+                TextField("Address", text: $url, prompt: Text("https://yourcompany.atlassian.net"))
+                TextField("Email (Cloud)", text: $email, prompt: Text("Your Atlassian account email"))
+                SecureField("API token", text: $token, prompt: Text("Cloud: API token · Data Center: personal access token"))
+                HStack {
+                    Spacer()
+                    Button("Add and Test") {
+                        let connection = jira.add(name: name, url: url, email: email, token: token)
+                        name = ""; url = ""; email = ""; token = ""
+                        adding = false
+                        Task { messages[connection.id] = await jira.test(connection.id) }
+                    }
+                    .disabled(!url.lowercased().hasPrefix("https://") || token.isEmpty)
+                }
+            }
+        } header: {
+            Text("Jira")
+        } footer: {
+            Text("""
+                Read-only: the app only ever reads tickets (it has no way to change one). Tokens are kept in the macOS \
+                Keychain. On Jira Cloud, a scoped token with only read:jira-work and read:jira-user makes Jira itself \
+                enforce read-only. Ticket text is used in Chat on your local model only. /jira KEY-1, /myjira.
+                """)
+            .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Important senders: the ones typed here and the ones marked "Important" in /triage, in one list.
+private struct ImportantSendersEditor: View {
+    @Environment(AppModel.self) private var app
+    @State private var newSender = ""
+
+    var body: some View {
+        let typed = app.importantSendersList
+        let ruled = app.senderRules.rules.filter { $0.action == .important }
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Important senders").font(.body)
+            if typed.isEmpty && ruled.isEmpty {
+                Text("None yet. They get a notification for new mail and always come first.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(typed, id: \.self) { sender in
+                row(sender, detail: nil) { app.removeImportantSender(sender) }
+            }
+            ForEach(ruled) { rule in
+                row(rule.name.map { "\($0) <\(rule.key)>" } ?? rule.key, detail: "from /triage") { app.senderRules.remove(rule.key) }
+            }
+            HStack {
+                TextField("Address, @domain or name", text: $newSender)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(add)
+                Button("Add", action: add)
+                    .disabled(newSender.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+
+    private func row(_ text: String, detail: String?, remove: @escaping () -> Void) -> some View {
+        HStack {
+            Text(text).lineLimit(1)
+            if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+            Spacer()
+            Button("Remove", systemImage: "minus.circle", action: remove)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+        }
+    }
+
+    private func add() {
+        app.addImportantSender(newSender)
+        newSender = ""
     }
 }

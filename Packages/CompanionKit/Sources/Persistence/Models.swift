@@ -2,6 +2,7 @@ import Automation
 import CompanionCore
 import PersonalData
 import Foundation
+import Jira
 import Mail
 import Obsidian
 import Routing
@@ -159,6 +160,8 @@ public enum MessageAttachment: Codable, Sendable, Hashable {
     case vaultTasks(title: String, tasks: [VaultTask])
     /// Unread mail sorted for /triage, with Read / Archive / Delete / Reply / Rule per mail.
     case mailTriage([TriageItem])
+    /// Jira tickets as cards (read-only).
+    case jiraIssues([JiraIssue])
 
     public var textForModel: String {
         switch self {
@@ -174,6 +177,8 @@ public enum MessageAttachment: Codable, Sendable, Hashable {
                 "- [\(item.category.rawValue)] \(item.message.subject) — \(item.message.senderName)"
                     + (item.ask.map { ": \($0)" } ?? "") + (item.handled.map { " (\($0.rawValue))" } ?? "") + " (id \(item.message.id))"
             }.joined(separator: "\n")
+        case .jiraIssues(let issues):
+            return issues.map(JiraFormatter.detail).joined(separator: "\n\n")
         case .vaultTasks(let title, let tasks):
             guard !tasks.isEmpty else { return "\(title): none" }
             return "\(title):\n" + tasks.map { "- " + VaultTaskFormatter.line($0) }.joined(separator: "\n")
