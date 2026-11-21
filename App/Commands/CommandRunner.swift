@@ -121,6 +121,9 @@ extension AppModel {
         case "watched":
             return runWatchedCommand(text: text, in: conversation, context: context)
 
+        case _ where Self.obsidianHandlers.contains(handler):
+            return runObsidianCommand(handler, input: input, text: text, in: conversation, context: context)
+
         case _ where Self.memoryHandlers.contains(handler):
             return runMemoryCommand(handler, input: input, text: text, in: conversation, context: context)
 

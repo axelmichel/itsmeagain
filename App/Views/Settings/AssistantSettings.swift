@@ -1,6 +1,7 @@
 import AppKit
 import Mail
 import Memory
+import Obsidian
 import PersonalData
 import SwiftUI
 
@@ -51,6 +52,7 @@ struct AssistantSettings: View {
 
             MailSettingsSection()
                 if app.mailEnabled { MailRulesSection() }
+                ObsidianSettingsSection()
                 MemorySettingsSection()
 
             Section {
@@ -266,5 +268,50 @@ private struct MemorySettingsSection: View {
                 """)
             .foregroundStyle(.secondary)
         }
+    }
+}
+
+private struct ObsidianSettingsSection: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        @Bindable var app = app
+        Section {
+            if app.detectedVaults.isEmpty {
+                Text("No Obsidian vaults found. Open your vault in Obsidian once, then come back.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(app.detectedVaults) { vault in
+                Toggle(isOn: Binding(get: { app.isVaultEnabled(vault) }, set: { app.setVault(vault, enabled: $0) })) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(vault.name)
+                        Text(vault.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            let enabled = app.detectedVaults.filter(app.isVaultEnabled)
+            if enabled.count > 1 {
+                Picker("Main vault", selection: Binding(
+                    get: { app.vaults.main?.vault.path ?? "" },
+                    set: { app.mainVaultPath = $0 }
+                )) {
+                    ForEach(enabled) { Text($0.name).tag($0.path) }
+                }
+            }
+            Toggle("Add to the daily note without asking", isOn: $app.dailyNoteWithoutAsking)
+        } header: {
+            Text("Obsidian")
+        } footer: {
+            Text("""
+                Chat can search and read the enabled vaults and list their tasks. It writes only into the main vault: \
+                lines in today's daily note, new notes in Inbox/, ticked tasks — each after your approval (or because \
+                you typed /note, /capture or ticked it yourself). Nothing is deleted, renamed or overwritten, and the \
+                app never commits: changes appear as uncommitted changes in your vault's git.
+                """)
+            .foregroundStyle(.secondary)
+        }
+        .onAppear { app.detectedVaults = Vault.detect() }
     }
 }

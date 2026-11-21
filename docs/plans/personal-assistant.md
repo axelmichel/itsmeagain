@@ -1,6 +1,6 @@
 # Plan: Personal assistant (iteration 2)
 
-Status: 2.1–2.3 done, 2.4 implemented (awaiting review) · Updated: 2026-11-21
+Status: 2.1–2.4 done, 2.5 implemented (awaiting review); Jira planned (docs/plans/jira.md) · Updated: 2026-11-21
 
 ## 1. Goal
 
@@ -429,6 +429,25 @@ test); a remembered preference changes the brief's language/length.
   or rename, no writes outside the vault (path-traversal test).
 - Commands: `/note`, `/capture`, `/todos`, `/done`, `/find`; optional user-command folder in the
   vault. The brief can be written into the daily note.
+
+**Implemented (2026-11-21):**
+- Vaults detected from Obsidian's own list (4 found: bits-and-bytes with git, books, cooking,
+  writing). Settings → Assistant → Obsidian: which vaults the assistant may use (default: the ones
+  open in Obsidian), main vault for daily note and captures, "daily note without asking".
+- `Obsidian` target: `NoteStore` (list, read by path or name, word search with snippets),
+  daily-note path from the vault's daily-notes settings (Moment format), Tasks plugin emoji
+  format (📅 ⏳ ✅, priorities, tags), tick/untick with done date.
+- Safe writes: vault-relative paths only (no `..`, absolute paths, `.obsidian`/`.git`, symlinks
+  out); hash check between read and write; atomic replace; new notes never overwrite; nothing is
+  deleted or renamed; the app never commits.
+- Tools (private): `search_notes`, `read_note`, `list_tasks`, `append_daily_note`, `create_note`,
+  `complete_task` (writes need approval). Note text is wrapped as untrusted (Clippings/).
+- Commands `/note`, `/capture`, `/todos [due|#tag|vault]`, `/done`, `/find`; task card with
+  checkboxes.
+- Measured on the real vault: 394 notes listed in 0.01 s, search 0.1 s, 26 open tasks in 0.9 s;
+  `gemma4:26b` picked the right tool 4/4 with 17 personal tools offered.
+- Not yet: vault as a Knowledge (embedding) source, writing the brief into the daily note,
+  user commands from the vault.
 
 ### Phase 2.6 — News (RSS)
 

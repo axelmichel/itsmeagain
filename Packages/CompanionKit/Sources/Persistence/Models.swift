@@ -3,6 +3,7 @@ import CompanionCore
 import PersonalData
 import Foundation
 import Mail
+import Obsidian
 import Routing
 import SwiftData
 import Tools
@@ -154,6 +155,8 @@ public enum MessageAttachment: Codable, Sendable, Hashable {
     case memories(title: String, ids: [UUID])
     /// Appointments found in mail, with free/conflict status and Add / Ignore.
     case appointments([AppointmentProposal])
+    /// Tasks from Obsidian notes with checkboxes (ticking writes the note).
+    case vaultTasks(title: String, tasks: [VaultTask])
 
     public var textForModel: String {
         switch self {
@@ -164,6 +167,9 @@ public enum MessageAttachment: Codable, Sendable, Hashable {
             return "Appointments found in mail:\n" + items.map { item in
                 "- \(item.title), \(ToolDate.day(item.start)) \(item.isAllDay ? "all day" : ToolDate.time(item.start)) (from \(item.sender); \(item.status.rawValue))"
             }.joined(separator: "\n")
+        case .vaultTasks(let title, let tasks):
+            guard !tasks.isEmpty else { return "\(title): none" }
+            return "\(title):\n" + tasks.map { "- " + VaultTaskFormatter.line($0) }.joined(separator: "\n")
         case .calendar, .memories:
             // The listing the model needs is in the message's content or modelContent.
             return ""

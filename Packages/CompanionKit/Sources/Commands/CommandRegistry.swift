@@ -98,6 +98,15 @@ public struct CommandRegistry: Sendable {
         ),
     ]
 
+    /// Obsidian vaults (Chat mode). Notes are only written where the user asked.
+    public static let obsidian: [CommandSpec] = [
+        CommandSpec(name: "note", summary: "Add a line to today's daily note", argumentHint: "<text>", kind: .native(handler: "note"), scope: .personal),
+        CommandSpec(name: "capture", summary: "Save a new note in Inbox/", argumentHint: "<title> — <text>", kind: .native(handler: "capture"), scope: .personal),
+        CommandSpec(name: "todos", summary: "Open tasks from your notes", argumentHint: "[due | #tag | vault]", kind: .native(handler: "todos"), scope: .personal),
+        CommandSpec(name: "done", summary: "Tick off a task from your notes", argumentHint: "<words>", kind: .native(handler: "done"), scope: .personal),
+        CommandSpec(name: "find", summary: "Search your notes", argumentHint: "<words>", kind: .native(handler: "find"), scope: .personal),
+    ]
+
     /// Personal memory (Chat mode, local models only).
     public static let memory: [CommandSpec] = [
         CommandSpec(name: "remember", summary: "Remember a fact about you, a person or a preference", argumentHint: "<fact>", kind: .native(handler: "remember"), scope: .personal),

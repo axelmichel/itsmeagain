@@ -4,6 +4,7 @@ import Foundation
 import Knowledge
 import Mail
 import Memory
+import Obsidian
 import PersonalData
 import Observation
 import Persistence
@@ -182,6 +183,43 @@ final class AppModel {
         didSet { UserDefaults.standard.set(findAppointmentsInMail, forKey: "findAppointmentsInMail") }
     }
 
+    // MARK: Obsidian
+
+    /// Vaults Obsidian knows about (refreshed when Settings opens).
+    var detectedVaults: [Vault] = Vault.detect()
+
+    /// Vaults the assistant may use; nil until chosen = the vaults open in Obsidian.
+    var enabledVaultPaths: [String]? = UserDefaults.standard.stringArray(forKey: "enabledVaults") {
+        didSet { UserDefaults.standard.set(enabledVaultPaths, forKey: "enabledVaults") }
+    }
+
+    /// Where the daily note and captures go.
+    var mainVaultPath: String? = UserDefaults.standard.string(forKey: "mainVault") {
+        didSet { UserDefaults.standard.set(mainVaultPath, forKey: "mainVault") }
+    }
+
+    var dailyNoteWithoutAsking: Bool = UserDefaults.standard.bool(forKey: "dailyNoteWithoutAsking") {
+        didSet { UserDefaults.standard.set(dailyNoteWithoutAsking, forKey: "dailyNoteWithoutAsking") }
+    }
+
+    func isVaultEnabled(_ vault: Vault) -> Bool {
+        enabledVaultPaths.map { $0.contains(vault.path) } ?? vault.isOpen
+    }
+
+    func setVault(_ vault: Vault, enabled: Bool) {
+        var paths = Set(enabledVaultPaths ?? detectedVaults.filter(\.isOpen).map(\.path))
+        if enabled { paths.insert(vault.path) } else { paths.remove(vault.path) }
+        enabledVaultPaths = paths.sorted()
+    }
+
+    /// Enabled vaults, the main one first.
+    var vaults: VaultSet {
+        let enabled = detectedVaults.filter(isVaultEnabled)
+        let main = enabled.first { $0.path == mainVaultPath } ?? enabled.first
+        let ordered = (main.map { [$0] } ?? []) + enabled.filter { $0.path != main?.path }
+        return VaultSet(stores: ordered.map { NoteStore(vault: $0) })
+    }
+
     /// Calendar, reminder and mail tools — only ever added to local-only tasks.
     var personalTools: [any Tool] {
         var tools = CalendarToolbox.tools(
@@ -189,6 +227,7 @@ final class AppModel {
         )
         if mailEnabled { tools += MailToolbox.tools(source: mailSource, preferences: mailPreferences) }
         tools += [RecallTool(memory: memory), RememberTool(memory: memory)]
+        tools += ObsidianToolbox.tools(vaults)
         return tools
     }
 
@@ -235,7 +274,10 @@ final class AppModel {
 
     /// Write tools the user allowed globally.
     var standingApprovals: Set<String> {
-        remindersWithoutAsking ? [PersonalToolName.createReminder] : []
+        var allowed: Set<String> = []
+        if remindersWithoutAsking { allowed.insert(PersonalToolName.createReminder) }
+        if dailyNoteWithoutAsking { allowed.insert(ObsidianToolName.appendDailyNote) }
+        return allowed
     }
 
     /// What the sidebar lists (persisted).
