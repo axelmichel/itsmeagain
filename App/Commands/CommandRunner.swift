@@ -106,6 +106,15 @@ extension AppModel {
             selectAuto(for: conversation)
             return .handled
 
+        case "inbox":
+            return runInboxCommand(input: input, text: text, in: conversation, context: context)
+
+        case "cleanup":
+            return runCleanupCommand(text: text, in: conversation, context: context)
+
+        case "digest":
+            return runDigestCommand(input: input, text: text, in: conversation, context: context)
+
         case _ where Self.calendarHandlers.contains(handler):
             return runCalendarCommand(handler, input: input, text: text, in: conversation, context: context)
 

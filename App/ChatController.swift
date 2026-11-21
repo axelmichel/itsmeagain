@@ -65,6 +65,22 @@ final class ChatController {
         start(text, modelText: modelText, in: conversation, context: context, plan: plan)
     }
 
+    /// Runs a native command's work (no model turn) as the conversation's running task, so Stop,
+    /// the progress indicator and automations treat it like a reply. Returns false while busy.
+    @discardableResult
+    func run(in conversation: Conversation, context: ModelContext, _ work: @escaping @MainActor () async -> Void) -> Bool {
+        guard !isStreaming(conversation) else { return false }
+        let key = conversation.persistentModelID
+        tasks[key] = Task {
+            await work()
+            conversation.updatedAt = .now
+            try? context.save()
+            tasks[key] = nil
+            startNext(in: conversation)
+        }
+        return true
+    }
+
     func resume(_ conversation: Conversation) {
         paused.remove(conversation.persistentModelID)
         startNext(in: conversation)

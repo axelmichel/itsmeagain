@@ -1,3 +1,4 @@
+import Automation
 import Persistence
 import SwiftData
 import SwiftUI
@@ -32,8 +33,16 @@ struct ContentView: View {
                     title: app.sidebarMode == .automations ? automation?.name ?? "Automations" : selection?.title ?? "ItsMeAgain",
                     showsSidebarControls: !sidebarVisible,
                     onToggleSidebar: toggleSidebar,
-                    onNew: app.sidebarMode == .automations ? newAutomation : newConversation
+                    onNew: app.sidebarMode == .automations ? newAutomation : newConversation,
+                    conversationID: selection?.persistentModelID,
+                    onRename: app.sidebarMode == .chats ? selection.map { conversation in
+                        { title in
+                            conversation.title = title
+                            try? context.save()
+                        }
+                    } : nil
                 )
+                .id(selection?.persistentModelID)
                 if app.sidebarMode == .automations {
                     if let automation {
                         AutomationEditor(automation: automation, onDelete: deleteAutomation, onOpenConversation: openConversation)
@@ -48,6 +57,17 @@ struct ContentView: View {
                                 .buttonStyle(.borderless)
                             Button("Add Morning Brief (/brief, weekdays 07:30)") {
                                 newAutomation(name: "Morning brief", command: "/brief")
+                            }
+                            .buttonStyle(.borderless)
+                            Button("Add Mail Cleanup (/cleanup, hourly)") {
+                                newAutomation(name: "Mail cleanup", command: "/cleanup", trigger: .interval(minutes: 60), notify: false)
+                            }
+                            .buttonStyle(.borderless)
+                            Button("Add Newsletter Digest (/digest, weekdays 08:00)") {
+                                newAutomation(
+                                    name: "Newsletter digest", command: "/digest",
+                                    trigger: .daily(hour: 8, minute: 0, weekdays: AutomationTrigger.weekdaysOnly)
+                                )
                             }
                             .buttonStyle(.borderless)
                         }
@@ -95,8 +115,14 @@ struct ContentView: View {
         newAutomation(name: "New Automation", command: "")
     }
 
-    private func newAutomation(name: String, command: String) {
-        let fresh = Automation(name: name, command: command, trigger: .daily(hour: 7, minute: 30, weekdays: [2, 3, 4, 5, 6]))
+    private func newAutomation(
+        name: String,
+        command: String,
+        trigger: AutomationTrigger = .daily(hour: 7, minute: 30, weekdays: AutomationTrigger.weekdaysOnly),
+        notify: Bool = true
+    ) {
+        let fresh = Automation(name: name, command: command, trigger: trigger)
+        fresh.notify = notify
         context.insert(fresh)
         try? context.save()
         app.sidebarMode = .automations
@@ -142,6 +168,13 @@ struct DetailHeader: View {
     let showsSidebarControls: Bool
     let onToggleSidebar: () -> Void
     let onNew: () -> Void
+    var conversationID: PersistentIdentifier?
+    /// Set when the title can be renamed (double-click, or "Rename…" in the sidebar).
+    var onRename: ((String) -> Void)?
+    @Environment(AppModel.self) private var app
+    @State private var editing = false
+    @State private var draft = ""
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -150,14 +183,55 @@ struct DetailHeader: View {
                 HeaderButton("Show Sidebar", systemImage: "sidebar.left", action: onToggleSidebar)
                 HeaderButton("New Chat", systemImage: "square.and.pencil", action: onNew)
             }
-            Text(title)
-                .font(.callout.weight(.medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
+            if editing {
+                TextField("Title", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(.callout.weight(.medium))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Theme.field)
+                    .focused($fieldFocused)
+                    .onSubmit(commit)
+                    .onKeyPress(.escape) {
+                        editing = false
+                        return .handled
+                    }
+                    .onChange(of: fieldFocused) { _, focused in if !focused && editing { commit() } }
+                    .frame(maxWidth: 420)
+            } else {
+                Text(title)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .onTapGesture(count: 2) { startEditing() }
+                    .help(onRename == nil ? "" : "Double-click to rename")
+                if onRename != nil {
+                    HeaderButton("Rename", systemImage: "pencil", action: startEditing)
+                        .opacity(0.7)
+                }
+            }
             Spacer()
         }
         .padding(.horizontal, 12)
         .headerBar()
+        .onChange(of: app.renameRequest, initial: true) { _, request in
+            guard let request, request == conversationID else { return }
+            app.renameRequest = nil
+            startEditing()
+        }
+    }
+
+    private func startEditing() {
+        guard onRename != nil else { return }
+        draft = title
+        editing = true
+        fieldFocused = true
+    }
+
+    private func commit() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        editing = false
+        if !trimmed.isEmpty, trimmed != title { onRename?(trimmed) }
     }
 }
 

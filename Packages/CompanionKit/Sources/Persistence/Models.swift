@@ -2,6 +2,7 @@ import Automation
 import CompanionCore
 import PersonalData
 import Foundation
+import Mail
 import Routing
 import SwiftData
 import Tools
@@ -38,6 +39,28 @@ public final class Conversation {
 
     public var orderedMessages: [StoredMessage] {
         messages.sorted { $0.order < $1.order }
+    }
+
+    /// What deleting `message` removes: the message itself, and for a question (`withAnswer`) the
+    /// replies up to the next question.
+    public func deletion(of message: StoredMessage, withAnswer: Bool) -> [StoredMessage] {
+        let ordered = orderedMessages
+        guard let index = ordered.firstIndex(where: { $0.id == message.id }) else { return [] }
+        guard withAnswer, message.role == .user else { return [message] }
+        let replies = ordered[(index + 1)...].prefix { $0.role != .user }
+        return [message] + replies
+    }
+
+    /// Messages containing `query` (case- and diacritic-insensitive), in transcript order.
+    public func messages(matching query: String) -> [StoredMessage] {
+        let query = query.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return [] }
+        return orderedMessages.filter { $0.content.localizedStandardContains(query) }
+    }
+
+    /// Title or any message contains `query`.
+    public func matches(_ query: String) -> Bool {
+        title.localizedStandardContains(query) || messages.contains { $0.content.localizedStandardContains(query) }
     }
 
     /// Appends a message at the end of the transcript.
@@ -110,16 +133,38 @@ public final class StoredMessage {
     }
 }
 
+public enum CalendarCardStyle: String, Codable, Sendable, Hashable {
+    /// One day's timeline (with the month grid folded away).
+    case day
+    /// Seven days from `date`.
+    case week
+    /// Month grid plus the selected day.
+    case month
+}
+
 /// Structured content shown interactively in the transcript.
 public enum MessageAttachment: Codable, Sendable, Hashable {
     /// A reminder list with checkboxes, due-date menus and delete.
     case reminders(title: String, items: [ReminderItem])
+    /// Mailing-list senders with Junk / Digest / Keep / Unsubscribe buttons.
+    case mailCleanup(groups: [SenderGroup])
+    /// A live calendar card (events are read from EventKit when shown); `date` is the selected day.
+    case calendar(style: CalendarCardStyle, date: Date)
 
     public var textForModel: String {
         switch self {
         case .reminders(let title, let items):
             guard !items.isEmpty else { return "\(title): none" }
             return "\(title):\n" + items.map { "- " + AgendaFormatter.reminderLine($0) + " (id \($0.id))" }.joined(separator: "\n")
+        case .calendar:
+            // The listing the model needs is in the message's modelContent.
+            return ""
+        case .mailCleanup(let groups):
+            guard !groups.isEmpty else { return "" }
+            return "Mailing-list senders:\n" + groups.map { group in
+                let state = group.outcome ?? group.rule.map { "rule: \($0.rawValue)" } ?? group.suggestion.map { "suggested: \($0.rawValue)" } ?? "undecided"
+                return "- \(group.name) <\(group.address)>, \(group.messages.count) messages, \(state)"
+            }.joined(separator: "\n")
         }
     }
 }

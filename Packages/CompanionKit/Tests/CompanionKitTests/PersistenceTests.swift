@@ -51,3 +51,27 @@ struct StoreMigrationTests {
         #expect(!conversations.isEmpty)
     }
 }
+
+@Suite struct TranscriptEditingTests {
+    @MainActor
+    @Test func deletingAQuestionTakesItsAnswersAndSearchFindsContent() throws {
+        let container = try ModelContainer(for: Schema(CompanionSchema.models), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let conversation = Conversation(title: "Trip")
+        container.mainContext.insert(conversation)
+        let q1 = conversation.append(role: .user, content: "Where is Zürich?")
+        let a1 = conversation.append(role: .assistant, content: "In Switzerland.")
+        let a1b = conversation.append(role: .assistant, content: "Also: it's big.")
+        let q2 = conversation.append(role: .user, content: "And Bern?")
+        let a2 = conversation.append(role: .assistant, content: "The capital, also Swiss.")
+
+        #expect(conversation.deletion(of: q1, withAnswer: true).map(\.id) == [q1, a1, a1b].map(\.id))
+        #expect(conversation.deletion(of: q1, withAnswer: false).map(\.id) == [q1.id])
+        #expect(conversation.deletion(of: a1, withAnswer: true).map(\.id) == [a1.id], "answers delete alone")
+        #expect(conversation.deletion(of: q2, withAnswer: true).map(\.id) == [q2, a2].map(\.id))
+
+        #expect(conversation.messages(matching: "zurich").map(\.id) == [q1.id], "diacritics ignored")
+        #expect(conversation.messages(matching: "SWISS").map(\.id) == [a2.id])
+        #expect(conversation.messages(matching: " ").isEmpty)
+        #expect(conversation.matches("trip") && conversation.matches("capital") && !conversation.matches("Paris"))
+    }
+}

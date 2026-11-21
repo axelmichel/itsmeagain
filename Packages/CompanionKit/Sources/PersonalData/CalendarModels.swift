@@ -5,12 +5,15 @@ public struct CalendarInfo: Sendable, Hashable, Identifiable {
     public var title: String
     public var source: String
     public var allowsWrites: Bool
+    /// "#RRGGBB", as shown in Calendar.
+    public var colorHex: String?
 
-    public init(id: String, title: String, source: String, allowsWrites: Bool) {
+    public init(id: String, title: String, source: String, allowsWrites: Bool, colorHex: String? = nil) {
         self.id = id
         self.title = title
         self.source = source
         self.allowsWrites = allowsWrites
+        self.colorHex = colorHex
     }
 }
 
@@ -30,12 +33,15 @@ public struct CalendarEvent: Sendable, Hashable, Identifiable {
     /// The user's own response to an invitation.
     public var participation: Participation
     public var isRecurring: Bool
+    /// "#RRGGBB" of the event's calendar.
+    public var colorHex: String?
 
     public init(
         id: String, title: String, start: Date, end: Date, isAllDay: Bool = false, calendar: String,
         location: String? = nil, notes: String? = nil, organizer: String? = nil, attendeeCount: Int = 0,
-        participation: Participation = .none, isRecurring: Bool = false
+        participation: Participation = .none, isRecurring: Bool = false, colorHex: String? = nil
     ) {
+        self.colorHex = colorHex
         self.id = id
         self.title = title
         self.start = start
@@ -109,5 +115,33 @@ public protocol CalendarStore: Sendable {
 extension CalendarStore {
     public func completeReminder(id: String) async throws -> ReminderItem {
         try await setReminderCompleted(id: id, true)
+    }
+}
+
+/// A month as rows of weeks for a calendar grid; days outside the month are nil.
+public struct MonthGrid: Sendable, Hashable {
+    /// Start of the month's first day.
+    public var month: Date
+    public var weeks: [[Date?]]
+    /// Short weekday symbols in grid order (respecting the first weekday).
+    public var weekdaySymbols: [String]
+
+    public init(containing date: Date, calendar: Calendar = .current) {
+        let first = calendar.date(from: calendar.dateComponents([.year, .month], from: date))!
+        let days = calendar.range(of: .day, in: .month, for: first)!.count
+        let leading = (calendar.component(.weekday, from: first) - calendar.firstWeekday + 7) % 7
+        var cells: [Date?] = Array(repeating: nil, count: leading)
+        cells += (0..<days).map { calendar.date(byAdding: .day, value: $0, to: first) }
+        cells += Array(repeating: nil, count: (7 - cells.count % 7) % 7)
+        month = first
+        weeks = stride(from: 0, to: cells.count, by: 7).map { Array(cells[$0..<$0 + 7]) }
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        weekdaySymbols = (0..<7).map { symbols[(calendar.firstWeekday - 1 + $0) % 7] }
+    }
+
+    /// The whole grid's date range, for one events query.
+    public var interval: DateInterval {
+        let calendar = Calendar.current
+        return DateInterval(start: month, end: calendar.date(byAdding: .month, value: 1, to: month)!)
     }
 }

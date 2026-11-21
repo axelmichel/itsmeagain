@@ -120,3 +120,13 @@ extension JSONValue {
         return value
     }
 }
+
+/// Marks text written by third parties (mail, news, web) so the model treats it as data.
+/// The Chat system prompt explains the tag; the tool policy enforces what really matters.
+public enum Untrusted {
+    public static func wrap(_ text: String, source: String) -> String {
+        // A closing tag inside the content must not end the block early.
+        let safe = text.replacingOccurrences(of: "</untrusted>", with: "</untrusted_>")
+        return "<untrusted source=\"\(source)\">\n\(safe)\n</untrusted>"
+    }
+}

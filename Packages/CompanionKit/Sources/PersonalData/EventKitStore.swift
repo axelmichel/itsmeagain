@@ -42,7 +42,25 @@ public actor EventKitStore: CalendarStore {
     }
 
     private static func info(_ calendar: EKCalendar) -> CalendarInfo {
-        CalendarInfo(id: calendar.calendarIdentifier, title: calendar.title, source: calendar.source?.title ?? "", allowsWrites: calendar.allowsContentModifications)
+        CalendarInfo(
+            id: calendar.calendarIdentifier, title: calendar.title, source: calendar.source?.title ?? "",
+            allowsWrites: calendar.allowsContentModifications, colorHex: hex(calendar.cgColor)
+        )
+    }
+
+    private static func hex(_ color: CGColor?) -> String? {
+        guard let color, let rgb = color.converted(to: CGColorSpace(name: CGColorSpace.sRGB)!, intent: .defaultIntent, options: nil),
+            let parts = rgb.components, parts.count >= 3
+        else { return nil }
+        return String(format: "#%02X%02X%02X", Int(parts[0] * 255), Int(parts[1] * 255), Int(parts[2] * 255))
+    }
+
+    /// Calendars new events can go into (visible and writable), the default first.
+    public func writableCalendars() -> [CalendarInfo] {
+        guard Self.eventsAuthorized else { return [] }
+        let defaultID = store.defaultCalendarForNewEvents?.calendarIdentifier
+        return visibleEventCalendars.filter(\.allowsContentModifications).map(Self.info)
+            .sorted { ($0.id == defaultID ? 0 : 1, $0.source, $0.title) < ($1.id == defaultID ? 0 : 1, $1.source, $1.title) }
     }
 
     private var visibleEventCalendars: [EKCalendar] {
@@ -76,6 +94,30 @@ public actor EventKitStore: CalendarStore {
         return Self.event(event)
     }
 
+    /// From the calendar card's form: a calendar by identifier, optionally all-day.
+    public func createEvent(title: String, start: Date, end: Date, isAllDay: Bool, calendarID: String?, location: String?) throws -> CalendarEvent {
+        guard Self.eventsAuthorized else { throw PersonalDataError.accessDenied("your calendars") }
+        let event = EKEvent(eventStore: store)
+        event.title = title
+        event.startDate = start
+        event.endDate = end
+        event.isAllDay = isAllDay
+        event.location = location
+        if let calendarID, let calendar = store.calendar(withIdentifier: calendarID), calendar.allowsContentModifications {
+            event.calendar = calendar
+        } else {
+            event.calendar = try writableCalendar(named: nil, type: .event)
+        }
+        try store.save(event, span: .thisEvent, commit: true)
+        return Self.event(event)
+    }
+
+    /// Only used to undo an event just added from the card.
+    public func deleteEvent(id: String) throws {
+        guard let event = store.event(withIdentifier: id) else { throw PersonalDataError.notFound("Event") }
+        try store.remove(event, span: .thisEvent, commit: true)
+    }
+
     public func moveEvent(id: String, start: Date, end: Date) throws -> CalendarEvent {
         guard Self.eventsAuthorized else { throw PersonalDataError.accessDenied("your calendars") }
         guard let event = store.event(withIdentifier: id) else { throw PersonalDataError.notFound("Event") }
@@ -107,7 +149,8 @@ public actor EventKitStore: CalendarStore {
             organizer: event.organizer?.name,
             attendeeCount: event.attendees?.count ?? 0,
             participation: participation,
-            isRecurring: event.hasRecurrenceRules
+            isRecurring: event.hasRecurrenceRules,
+            colorHex: hex(event.calendar?.cgColor)
         )
     }
 

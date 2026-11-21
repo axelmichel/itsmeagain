@@ -167,3 +167,82 @@ public enum DurationParser {
         return total > 0 ? total : nil
     }
 }
+
+/// Days typed by the user for lookups (/cal, /agenda): "24.12.", "24.12.2026", "Dezember",
+/// "march 2027", "2026-12", plus everything `ToolDate` and natural phrases ("next Friday") cover.
+/// Dates without a year mean the next one coming; a month name means its first day (today for the
+/// current month).
+public enum DayParser {
+    static let months: [String: Int] = {
+        var map: [String: Int] = [:]
+        for identifier in ["en_US", "de_DE"] {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: identifier)
+            for (index, name) in formatter.monthSymbols.enumerated() {
+                map[name.lowercased()] = index + 1
+                map[String(name.lowercased().prefix(3))] = index + 1
+            }
+        }
+        map["märz"] = 3
+        map["maerz"] = 3
+        return map
+    }()
+
+    public static func parse(_ text: String, now: Date = .now, calendar: Calendar = .current) -> Date? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !trimmed.isEmpty else { return nil }
+        let today = calendar.startOfDay(for: now)
+
+        // 24.12. / 24.12 / 24.12.26 / 24.12.2026
+        if let match = trimmed.wholeMatch(of: /(\d{1,2})\.(\d{1,2})\.?(\d{2,4})?/) {
+            let year = match.3.flatMap { Int($0) }.map { $0 < 100 ? 2000 + $0 : $0 }
+            return day(Int(match.1)!, Int(match.2)!, year: year, today: today, calendar: calendar)
+        }
+        // 2026-12 / 12/2026 / 12.2026
+        if let match = trimmed.wholeMatch(of: /(\d{4})-(\d{1,2})/) {
+            return monthStart(Int(match.2)!, year: Int(match.1)!, today: today, calendar: calendar)
+        }
+        if let match = trimmed.wholeMatch(of: /(\d{1,2})[\/.](\d{4})/) {
+            return monthStart(Int(match.1)!, year: Int(match.2)!, today: today, calendar: calendar)
+        }
+        // december / dez 2026 / 24 december / december 24
+        let words = trimmed.replacingOccurrences(of: ".", with: " ").split(separator: " ").map(String.init)
+        if let monthIndex = words.firstIndex(where: { months[$0] != nil }) {
+            let month = months[words[monthIndex]]!
+            let numbers = words.enumerated().filter { $0.offset != monthIndex }.compactMap { Int($0.element) }
+            let year = numbers.first { $0 > 31 }
+            if let dayNumber = numbers.first(where: { $0 <= 31 }), words.count <= 3 {
+                return day(dayNumber, month, year: year, today: today, calendar: calendar)
+            }
+            if words.count <= 2 {
+                return monthStart(month, year: year ?? upcomingYear(month: month, today: today, calendar: calendar), today: today, calendar: calendar)
+            }
+        }
+        if let parsed = ToolDate.parse(trimmed, now: now, calendar: calendar) { return parsed.date }
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
+        return detector?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text))?.date
+    }
+
+    private static func day(_ day: Int, _ month: Int, year: Int?, today: Date, calendar: Calendar) -> Date? {
+        guard (1...12).contains(month), (1...31).contains(day) else { return nil }
+        let thisYear = calendar.component(.year, from: today)
+        var components = DateComponents(year: year ?? thisYear, month: month, day: day)
+        guard var date = calendar.date(from: components), calendar.component(.day, from: date) == day else { return nil }
+        if year == nil, date < today {
+            components.year = thisYear + 1
+            date = calendar.date(from: components) ?? date
+        }
+        return date
+    }
+
+    private static func monthStart(_ month: Int, year: Int, today: Date, calendar: Calendar) -> Date? {
+        guard (1...12).contains(month) else { return nil }
+        if calendar.component(.year, from: today) == year, calendar.component(.month, from: today) == month { return today }
+        return calendar.date(from: DateComponents(year: year, month: month, day: 1))
+    }
+
+    private static func upcomingYear(month: Int, today: Date, calendar: Calendar) -> Int {
+        let year = calendar.component(.year, from: today)
+        return month < calendar.component(.month, from: today) ? year + 1 : year
+    }
+}

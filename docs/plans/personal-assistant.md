@@ -1,6 +1,6 @@
 # Plan: Personal assistant (iteration 2)
 
-Status: 2.1 done, 2.2 implemented (awaiting review) · Updated: 2026-11-21
+Status: 2.1–2.2 done, 2.3 + mail cleanup/digest implemented (awaiting review) · Updated: 2026-11-21
 
 ## 1. Goal
 
@@ -336,10 +336,49 @@ read-only live test gated by `ASSISTANT_LIVE=1`; `/today` renders in < 1 s witho
   classification "needs reply / FYI / newsletter / spam-ish" (JSON schema) → summary.
 - Commands: `/inbox`, `/triage`, `/from <person>`, `/reply`. Template **Mail triage**; mail joins
   `/brief`.
+- Measured on the real inbox (2026-11-21): listing 80 messages ≈ 1.5 s, but `content()` ≈ 7 s per
+  message (bodies download on demand) → lists use headers only; bodies only via `mail_read`.
 
 **Acceptance:** recorded-JSON fake runner; performance cap respected (limits/timeouts);
 injection test: a mail asking to forward data → at most a proposed draft that still needs
 approval, never sent.
+
+#### 2.3b — Spam cleanup and newsletter digest
+
+Goal: get rid of spam and keep only the newsletter content that matters (decided 2026-11-21:
+unwanted mail → Junk; rules run automatically once decided per sender; digested newsletters are
+marked read and archived; topics AI / LLMs, Swift / iOS / macOS, Web / JS / TypeScript, editable).
+
+- Headers: `List-Unsubscribe(-Post)`, `List-Id`, `Precedence`, `Auto-Submitted` read inline while
+  listing (≈ 0.25 s per message) → `BulkInfo`. Bodies via raw `source()` (≈ 50 ms–1 s) and our own
+  MIME parser (multipart, QP/base64, RFC 2047, charsets) instead of `content()` (≈ 7 s).
+- `SenderRuleBook`: per address or `@domain`, action digest / junk / keep, with the sender name.
+- `/cleanup` (alias `/spam`): applies junk rules (move to Junk, mark read), groups the remaining
+  mailing-list mail by sender, asks the local Chat model for a suggestion per new sender (earlier
+  decisions are the examples, so it learns the user's taste). Interactive rows: Junk / Digest /
+  Keep (saves a rule), domain-wide variants, Archive, Unsubscribe, Undo, "Apply suggestions".
+  Mail only moves on a rule or click, never on a suggestion alone.
+- Unsubscribe: RFC 8058 one-click POST (public hosts only), else open the page in the browser, else
+  a mailto draft the user sends. Only on a click with confirmation; never offered for junk.
+- `/digest [days]`: digest senders' unread newsletters → per-newsletter JSON extraction (topic
+  enum, title, summary, link) → links must occur in the newsletter text → grouped Markdown;
+  digested mail marked read and archived; failures stay in the inbox; new senders are mentioned.
+- Automation templates: Mail cleanup (hourly, no notification), Newsletter digest (weekdays 08:00).
+- Measured (2026-11-21): 120 headers ≈ 30 s; first `/cleanup` with 50 new senders ≈ 90 s (later
+  runs only ask about new senders); extraction of a made-up tech newsletter exact (3/3 on-topic,
+  ad/job/off-topic skipped) in ≈ 5 s on `gemma4:26b`.
+
+#### 2.2b — Calendar card (requested 2026-11-21)
+
+- `/today`, `/tomorrow`, `/agenda <date>`, `/week` and the new `/cal [date or month]` (aliases
+  `/calendar`, `/month`) show a live calendar card instead of text: day timeline in calendar
+  colours (all-day first, declined struck through), a foldable month grid with event dots, day/week
+  arrows and Today. The plain listing goes to the model as `modelContent` for follow-up questions.
+- `+` on the card: title, start, all-day, duration, location, calendar → EventKit directly (the
+  user's click), with Undo. `/event <what> <when>` (alias `/add`) lets the model parse a sentence
+  and goes through the normal approval card.
+- `DayParser`: "24.12.", "3.2." (next one coming), "Dezember", "march 2028", "2026-12", "dec 24",
+  then `ToolDate` and natural phrases.
 
 ### Phase 2.4 — Personal memory
 

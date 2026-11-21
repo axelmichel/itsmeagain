@@ -2,6 +2,7 @@ import AppleIntelligence
 import CompanionCore
 import Foundation
 import Knowledge
+import Mail
 import PersonalData
 import Observation
 import Persistence
@@ -102,6 +103,73 @@ final class AppModel {
         didSet { UserDefaults.standard.set(remindersWithoutAsking, forKey: "remindersWithoutAsking") }
     }
 
+    /// Apple Mail for the assistant (asks macOS for permission on first use).
+    var mailEnabled: Bool = UserDefaults.standard.object(forKey: "mailEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(mailEnabled, forKey: "mailEnabled") }
+    }
+
+    var excludedMailAccounts: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "excludedMailAccounts") ?? []) {
+        didSet { UserDefaults.standard.set(Array(excludedMailAccounts), forKey: "excludedMailAccounts") }
+    }
+
+    /// Comma- or line-separated addresses / names.
+    var vipSenders: String = UserDefaults.standard.string(forKey: "vipSenders") ?? "" {
+        didSet { UserDefaults.standard.set(vipSenders, forKey: "vipSenders") }
+    }
+
+    var newsletterSenders: String = UserDefaults.standard.string(forKey: "newsletterSenders") ?? "" {
+        didSet { UserDefaults.standard.set(newsletterSenders, forKey: "newsletterSenders") }
+    }
+
+    var mailPreferences: MailPreferences {
+        // Senders the user sorted into Digest or Junk count as automated mail too.
+        let ruled = senderRules.rules.filter { $0.action != .keep }.map(\.key)
+        return MailPreferences(
+            excludedAccounts: excludedMailAccounts, vipSenders: Self.split(vipSenders), newsletterSenders: Self.split(newsletterSenders) + ruled
+        )
+    }
+
+    private static func split(_ text: String) -> [String] {
+        text.split(whereSeparator: { $0 == "," || $0.isNewline }).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    /// What the user decided per mailing-list sender (Junk / Digest / Keep); junk rules run automatically.
+    var senderRules: SenderRuleBook = UserDefaults.standard.data(forKey: "senderRules")
+        .flatMap { try? JSONDecoder().decode(SenderRuleBook.self, from: $0) } ?? SenderRuleBook() {
+        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(senderRules), forKey: "senderRules") }
+    }
+
+    /// Topics the newsletter digest keeps, comma-separated.
+    var newsletterTopics: String = UserDefaults.standard.string(forKey: "newsletterTopics")
+        ?? NewsletterDigest.defaultTopics.joined(separator: ", ") {
+        didSet { UserDefaults.standard.set(newsletterTopics, forKey: "newsletterTopics") }
+    }
+
+    var newsletterTopicList: [String] {
+        let topics = Self.split(newsletterTopics)
+        return topics.isEmpty ? NewsletterDigest.defaultTopics : topics
+    }
+
+    /// The Chat task's model, for mail decisions and digests — only if it runs locally.
+    func localMailModel() throws -> MailModel {
+        let profile = taskProfiles[.chat]
+        guard let config = config(for: profile.providerID), config.isLocal, let provider = provider(for: profile.providerID) else {
+            throw ProviderError.unavailable("Mail cleanup needs a local Chat model. Choose one in Settings → Tasks → Chat.")
+        }
+        return MailModel(provider: provider, model: profile.modelID)
+    }
+
+    let mailSource: any MailSource = AppleMailSource()
+
+    /// Calendar, reminder and mail tools — only ever added to local-only tasks.
+    var personalTools: [any Tool] {
+        var tools = CalendarToolbox.tools(
+            store: EventKitStore.shared, events: EventKitStore.eventsAuthorized, reminders: EventKitStore.remindersAuthorized
+        )
+        if mailEnabled { tools += MailToolbox.tools(source: mailSource, preferences: mailPreferences) }
+        return tools
+    }
+
     /// Write tools the user allowed globally.
     var standingApprovals: Set<String> {
         remindersWithoutAsking ? [PersonalToolName.createReminder] : []
@@ -130,6 +198,8 @@ final class AppModel {
     private(set) var hotKeyRegistered = true
     /// The main window selects this conversation when set (e.g. "Open in ItsMeAgain" from the quick panel).
     var requestedConversation: PersistentIdentifier?
+    /// Sidebar "Rename…": the header starts editing this conversation's title.
+    var renameRequest: PersistentIdentifier?
     @ObservationIgnored private(set) var quickPanel: QuickPanelController?
     @ObservationIgnored private var hotKey: GlobalHotKey?
     /// SwiftUI's openWindow, captured from a view that lives as long as the app (the menu bar label).
@@ -324,20 +394,12 @@ final class AppModel {
     /// The task's tools; local-only tasks (Chat) also get the personal tools the user granted access to.
     func makeTools(for profile: TaskProfile) -> [any Tool] {
         var tools = makeTools(named: profile.tools)
-        if profile.localOnly {
-            tools += CalendarToolbox.tools(
-                store: EventKitStore.shared,
-                events: EventKitStore.eventsAuthorized,
-                reminders: EventKitStore.remindersAuthorized
-            )
-        }
+        if profile.localOnly { tools += personalTools }
         return tools
     }
 
     func makeTools(named names: [String]) -> [any Tool] {
-        let personal = CalendarToolbox.tools(
-            store: EventKitStore.shared, events: EventKitStore.eventsAuthorized, reminders: EventKitStore.remindersAuthorized
-        )
+        let personal = personalTools
         return names.compactMap { name -> (any Tool)? in
             if let tool = personal.first(where: { $0.spec.name == name }) { return tool }
             switch name {

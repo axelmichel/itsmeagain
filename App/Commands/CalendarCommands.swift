@@ -6,7 +6,7 @@ import SwiftData
 
 /// Native calendar commands: instant listings straight from EventKit, no model involved.
 extension AppModel {
-    static let calendarHandlers: Set<String> = ["today", "tomorrow", "week", "agenda", "free", "reminders"]
+    static let calendarHandlers: Set<String> = ["today", "tomorrow", "week", "agenda", "cal", "free", "reminders"]
 
     func runCalendarCommand(_ handler: String, input: CommandInput, text: String, in conversation: Conversation, context: ModelContext) -> CommandOutcome {
         let calendar = Calendar.current
@@ -21,8 +21,15 @@ extension AppModel {
         case "tomorrow": range = (day(1), day(2))
         case "week": range = (today, day(7))
         case "agenda":
-            guard let date = Self.parseDay(input.arguments) else { return .failed("Usage: /agenda <date> — e.g. 2026-11-24, tomorrow, next Friday") }
+            guard let date = Self.parseDay(input.arguments) else { return .failed("Usage: /agenda <date> — e.g. 24.12., tomorrow, next Friday") }
             let start = calendar.startOfDay(for: date)
+            range = (start, calendar.date(byAdding: .day, value: 1, to: start)!)
+        case "cal":
+            var start = today
+            if !input.arguments.isEmpty {
+                guard let date = Self.parseDay(input.arguments) else { return .failed("Usage: /cal [date or month] — e.g. 24.12., December, next Friday") }
+                start = calendar.startOfDay(for: date)
+            }
             range = (start, calendar.date(byAdding: .day, value: 1, to: start)!)
         case "free":
             guard let first = input.positional.first, let minutes = DurationParser.minutes(first) else {
@@ -36,13 +43,14 @@ extension AppModel {
             break
         }
 
+        guard !chat.isStreaming(conversation) else { return .failed("Wait for the current reply to finish.") }
         if conversation.messages.isEmpty { conversation.title = text }
         conversation.append(role: .user, content: text, task: .chat)
         let reply = conversation.append(role: .assistant, content: "", task: .chat)
         try? context.save()
 
         let list = input.arguments.isEmpty ? nil : input.arguments
-        Task {
+        chat.run(in: conversation, context: context) { [self] in
             do {
                 try await ensureCalendarAccess(reminders: handler == "today" || handler == "reminders")
                 let store = EventKitStore.shared
@@ -61,17 +69,19 @@ extension AppModel {
                             "- \(ToolDate.time($0.start))–\(ToolDate.time($0.end))"
                         }.joined(separator: "\n")
                 default:
+                    // A calendar card for the eye; the plain listing for the model's follow-ups.
                     let (from, to) = range!
-                    var text = AgendaFormatter.agenda(try await store.events(from: from, to: to), from: from, to: to, markdown: true)
+                    reply.modelContent = AgendaFormatter.agenda(try await store.events(from: from, to: to), from: from, to: to, markdown: false)
+                    let style: CalendarCardStyle = handler == "week" ? .week : handler == "cal" ? .month : .day
+                    var attachments: [MessageAttachment] = [.calendar(style: style, date: from)]
                     if handler == "today", let due = try await dueReminders(before: to), !due.isEmpty {
-                        reply.attachments = [.reminders(title: "Reminders due", items: due)]
+                        attachments.append(.reminders(title: "Reminders due", items: due))
                     }
-                    reply.content = text
+                    reply.attachments = attachments
                 }
             } catch {
                 reply.errorText = error.localizedDescription
             }
-            try? context.save()
         }
         return .handled
     }
@@ -85,13 +95,9 @@ extension AppModel {
         guard EventKitStore.eventsAuthorized else { throw PersonalDataError.accessDenied("your calendars") }
     }
 
-    /// "2026-11-24", "tomorrow", "morgen", or natural phrases like "next Friday".
+    /// "24.12.", "Dezember", "2026-11-24", "tomorrow", "next Friday", …
     static func parseDay(_ text: String) -> Date? {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
-        if let parsed = ToolDate.parse(trimmed) { return parsed.date }
-        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
-        return detector?.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed))?.date
+        DayParser.parse(text)
     }
 
     /// Open reminders due before `date` (overdue first); nil without reminder access.

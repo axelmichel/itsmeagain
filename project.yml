@@ -28,7 +28,7 @@ targets:
       - App
     dependencies:
       - package: CompanionKit
-        products: [CompanionCore, Providers, Persistence, Routing, AppleIntelligence, Tools, Knowledge, Commands, Automation, PersonalData]
+        products: [CompanionCore, Providers, Persistence, Routing, AppleIntelligence, Tools, Knowledge, Commands, Automation, PersonalData, Mail]
       - package: Highlighter
     entitlements:
       path: App/ItsMeAgain.entitlements
@@ -41,6 +41,8 @@ targets:
         com.apple.security.files.bookmarks.app-scope: true
         # Hardened runtime: EventKit access (calendars and reminders).
         com.apple.security.personal-information.calendars: true
+        # Hardened runtime: Apple Events to Mail (read mail, open drafts).
+        com.apple.security.automation.apple-events: true
     settings:
       base:
         PRODUCT_NAME: ItsMeAgain
@@ -51,6 +53,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: ItsMeAgain
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: ItsMeAgain shows your schedule, finds free time and creates events you approve. Everything stays on this Mac.
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: ItsMeAgain reads your recent mail in Apple Mail for summaries and opens reply drafts you send yourself. Mail never leaves this Mac.
         INFOPLIST_KEY_NSRemindersFullAccessUsageDescription: ItsMeAgain lists your reminders and creates the ones you ask for. Everything stays on this Mac.
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Automatic

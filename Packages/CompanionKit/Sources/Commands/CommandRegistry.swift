@@ -46,6 +46,26 @@ public struct CommandRegistry: Sendable {
         CommandSpec(name: "tomorrow", summary: "Tomorrow's events", kind: .native(handler: "tomorrow"), scope: .personal),
         CommandSpec(name: "week", summary: "Events for the next seven days", kind: .native(handler: "week"), scope: .personal),
         CommandSpec(name: "agenda", summary: "Events on a given day", argumentHint: "<date>", kind: .native(handler: "agenda"), scope: .personal),
+        CommandSpec(
+            name: "cal", summary: "Mini calendar: click a day to see it, + to add an event", argumentHint: "[date or month]",
+            kind: .native(handler: "cal"), scope: .personal, aliases: ["calendar", "month"]
+        ),
+        CommandSpec(
+            name: "event", summary: "Add an event from a description", argumentHint: "<what> <when> [where]",
+            kind: .prompt(PromptCommand(
+                template: """
+                    Add one calendar event for this request: $ARGUMENTS
+                    Now is {{now}}. Work out the day, start time and end from the request (relative words like "tomorrow" \
+                    or "Friday 3pm" are relative to now; one hour if no duration is given). Use the request's language for \
+                    the title, and set the location if one is named. Call create_event, then confirm in one short sentence \
+                    with weekday, date and time.
+                    """,
+                task: .chat,
+                tools: ["calendar_events", "create_event"]
+            )),
+            scope: .personal,
+            aliases: ["add"]
+        ),
         CommandSpec(name: "free", summary: "Free time in your calendar", argumentHint: "<30m|1h> [day]", kind: .native(handler: "free"), scope: .personal),
         CommandSpec(name: "reminders", summary: "Open reminders, overdue first", argumentHint: "[list]", kind: .native(handler: "reminders"), scope: .personal),
         CommandSpec(
@@ -67,11 +87,63 @@ public struct CommandRegistry: Sendable {
             kind: .prompt(PromptCommand(
                 template: """
                     Give me my brief for {{today}} ({{date}}): today's events with times, anything I should prepare for, \
-                    reminders that are due today or overdue, and my free time today. Mention tomorrow's first event if \
-                    it starts early. Keep it short and skimmable. $ARGUMENTS
+                    reminders that are due today or overdue, my free time today, and unread mail that needs attention \
+                    (skip automated mail; [VIP] first; at most five). Mention tomorrow's first event if it starts early. \
+                    Keep it short and skimmable. $ARGUMENTS
                     """,
                 task: .chat,
-                tools: ["calendar_events", "free_slots", "reminders"]
+                tools: ["calendar_events", "free_slots", "reminders", "mail_unread"]
+            )),
+            scope: .personal
+        ),
+    ]
+
+    /// Apple Mail commands (personal). Mail is only read; replies become drafts the user sends.
+    public static let mail: [CommandSpec] = [
+        CommandSpec(name: "inbox", summary: "Unread mail of the last two days", argumentHint: "[account]", kind: .native(handler: "inbox"), scope: .personal),
+        CommandSpec(
+            name: "cleanup", summary: "Junk spam by your rules, decide on new mailing lists",
+            kind: .native(handler: "cleanup"), scope: .personal, aliases: ["spam"]
+        ),
+        CommandSpec(
+            name: "digest", summary: "Newsletter digest for your topics; digested mail is archived", argumentHint: "[days]",
+            kind: .native(handler: "digest"), scope: .personal
+        ),
+        CommandSpec(
+            name: "triage", summary: "Sort unread mail: needs reply, FYI, automated",
+            kind: .prompt(PromptCommand(
+                template: """
+                    Triage my unread mail of the last two days (use mail_unread). Group it into: **Needs a reply**, \
+                    **FYI**, and **Automated / newsletters** (one line in total for these, with a count). [VIP] senders \
+                    come first. For "Needs a reply", read the message (mail_read) when the subject isn't clear enough, and \
+                    state in one short line what they actually ask for, with any deadline (e.g. "wants the Q1 numbers by \
+                    Monday") — not just "action needed". Don't draft replies unless I ask. $ARGUMENTS
+                    """,
+                task: .chat,
+                tools: ["mail_unread", "mail_read"]
+            )),
+            scope: .personal
+        ),
+        CommandSpec(
+            name: "from", summary: "Recent mail from someone, summarised", argumentHint: "<person>",
+            kind: .prompt(PromptCommand(
+                template: "Find mail from “$ARGUMENTS” of the last 30 days (mail_search with from, days 30) and summarise what they wrote, newest first. Read the latest message if needed.",
+                task: .chat,
+                tools: ["mail_search", "mail_read"]
+            )),
+            scope: .personal
+        ),
+        CommandSpec(
+            name: "reply", summary: "Draft a reply (opens in Mail, never sent)", argumentHint: "<person or subject> — <what to say>",
+            kind: .prompt(PromptCommand(
+                template: """
+                    Draft a reply. Request: $ARGUMENTS
+                    Find the message (mail_search by sender or subject), read it (mail_read), then call \
+                    mail_create_draft with reply_to_id and a reply in the language of the original. Keep it short and in my \
+                    voice. The draft only opens in Mail; I send it myself.
+                    """,
+                task: .chat,
+                tools: ["mail_search", "mail_read", "mail_create_draft"]
             )),
             scope: .personal
         ),

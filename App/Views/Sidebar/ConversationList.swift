@@ -18,7 +18,8 @@ struct ConversationList: View {
 
     private var filtered: [Conversation] {
         guard !search.isEmpty else { return conversations }
-        return conversations.filter { $0.title.localizedStandardContains(search) }
+        // Titles and message text: finds a conversation by anything that was said in it.
+        return conversations.filter { $0.matches(search) }
     }
 
     private var sections: [(task: TaskKind, conversations: [Conversation])] {
@@ -57,7 +58,7 @@ struct ConversationList: View {
                 Image(systemName: "magnifyingglass")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
-                TextField("Search", text: $search)
+                TextField("Search titles and messages", text: $search)
                     .textFieldStyle(.plain)
                     .font(.callout)
             }
@@ -81,6 +82,11 @@ struct ConversationList: View {
                                     listFocused = true
                                 }
                                 .contextMenu {
+                                    Button("Rename…") {
+                                        selection = conversation
+                                        app.renameRequest = conversation.persistentModelID
+                                    }
+                                    Divider()
                                     Button("Delete", role: .destructive) { delete(conversation) }
                                 }
                             }

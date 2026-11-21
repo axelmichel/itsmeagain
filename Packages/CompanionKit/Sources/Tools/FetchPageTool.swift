@@ -81,7 +81,7 @@ public struct FetchPageTool: Tool {
     // MARK: URL policy
 
     /// Only public http(s) URLs: no local files, localhost, LAN or link-local addresses.
-    static func validatedURL(_ string: String) throws -> URL {
+    public static func validatedURL(_ string: String) throws -> URL {
         guard let url = URL(string: string), let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
             let host = url.host()?.lowercased(), !host.isEmpty
         else {
