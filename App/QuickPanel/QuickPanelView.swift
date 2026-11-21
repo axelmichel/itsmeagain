@@ -1,4 +1,5 @@
 import AppKit
+import Commands
 import Observation
 import Persistence
 import Routing
@@ -67,6 +68,13 @@ struct QuickPanelView: View {
     @Environment(\.modelContext) private var context
     @FocusState private var focused: Bool
     @State private var answerHeight: CGFloat = 0
+    @State private var suggestionIndex = 0
+    @State private var suggestionsDismissed = false
+    @State private var commandError: String?
+
+    private var completion: CommandCompletion {
+        CommandCompletion(registry: app.commands.registry, text: state.draft, dismissed: suggestionsDismissed)
+    }
 
     private var isStreaming: Bool {
         state.conversation.map { app.chat.isStreaming($0) } ?? false
@@ -90,9 +98,25 @@ struct QuickPanelView: View {
                     .lineLimit(1...6)
                     .focused($focused)
                     .onSubmit(send)
+                    .onKeyPress(.upArrow) { moveSuggestion(-1) }
+                    .onKeyPress(.downArrow) { moveSuggestion(1) }
+                    .onKeyPress(.tab) { acceptSuggestion() ? .handled : .ignored }
+                    .onKeyPress(.return, phases: .down) { _ in acceptSuggestion() ? .handled : .ignored }
                 if isStreaming {
                     ProgressView().controlSize(.small)
                 }
+            }
+
+            let suggestions = completion.suggestions
+            if !suggestions.isEmpty {
+                CommandSuggestions(commands: suggestions, selected: min(suggestionIndex, suggestions.count - 1)) { pick in
+                    state.draft = CommandCompletion.accepted(pick)
+                }
+            } else if let note = commandError ?? completion.argumentHint {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(commandError == nil ? Color.secondary : Color.orange)
+                    .lineLimit(1)
             }
 
             toolbar
@@ -123,6 +147,11 @@ struct QuickPanelView: View {
         // The hidden title bar would otherwise reserve space above the field.
         .ignoresSafeArea()
         .onChange(of: state.focusRequest, initial: true) { focused = true }
+        .onChange(of: state.draft) { _, text in
+            suggestionIndex = 0
+            commandError = nil
+            if !text.hasPrefix("/") { suggestionsDismissed = false }
+        }
         .onExitCommand(perform: onClose)
     }
 
@@ -182,9 +211,42 @@ struct QuickPanelView: View {
         }
     }
 
+    private func moveSuggestion(_ delta: Int) -> KeyPress.Result {
+        let count = completion.suggestions.count
+        guard count > 0 else { return .ignored }
+        suggestionIndex = (suggestionIndex + delta + count) % count
+        return .handled
+    }
+
+    /// Inserts the selected suggestion; false when there is none or the name is already complete.
+    private func acceptSuggestion() -> Bool {
+        let suggestions = completion.suggestions
+        guard !suggestions.isEmpty else { return false }
+        let pick = suggestions[min(suggestionIndex, suggestions.count - 1)]
+        guard state.draft.trimmingCharacters(in: .whitespaces) != "/\(pick.name)" else { return false }
+        state.draft = CommandCompletion.accepted(pick)
+        return true
+    }
+
     private func send() {
         let text = state.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        if CommandInput(text) != nil {
+            // Commands run in the panel's conversation (a Chat one if none is open yet).
+            let conversation = state.conversation.flatMap { $0.isDeleted ? nil : $0 } ?? {
+                let fresh = Conversation(task: .chat)
+                context.insert(fresh)
+                state.conversation = fresh
+                return fresh
+            }()
+            let outcome = app.runCommand(text, in: conversation, context: context) { state.conversation = $0 }
+            if case .failed(let message)? = outcome {
+                commandError = message
+            } else {
+                state.draft = ""
+            }
+            return
+        }
         let conversation: Conversation
         if let current = state.conversation, !current.isDeleted {
             conversation = current

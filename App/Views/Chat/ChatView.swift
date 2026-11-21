@@ -1,3 +1,4 @@
+import Commands
 import Persistence
 import SwiftData
 import SwiftUI
@@ -7,6 +8,9 @@ struct ChatView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.modelContext) private var context
     @State private var draft = ""
+    @State private var suggestionIndex = 0
+    @State private var suggestionsDismissed = false
+    @State private var commandError: String?
     @State private var viewportHeight: CGFloat = 0
     @AppStorage("composerHeight") private var composerHeight = Composer.defaultHeight
 
@@ -48,18 +52,71 @@ struct ChatView: View {
                 ComposerResizeHandle(height: $composerHeight, maxHeight: max(Composer.minHeight, viewportHeight * 0.6))
                 TaskBar(conversation: conversation)
                     .padding(.bottom, 8)
-                Composer(text: $draft, height: composerHeight, isStreaming: isStreaming, onSend: send) {
+                let suggestions = completion.suggestions
+                if !suggestions.isEmpty {
+                    CommandSuggestions(commands: suggestions, selected: min(suggestionIndex, suggestions.count - 1)) { accept($0) }
+                } else if let note = commandError ?? completion.argumentHint {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(commandError == nil ? Color.secondary : Color.orange)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.field)
+                        .overlay(alignment: .top) { Theme.border.frame(height: 1) }
+                }
+                Composer(
+                    text: $draft,
+                    height: composerHeight,
+                    isStreaming: isStreaming,
+                    suggestionCount: suggestions.count,
+                    onSuggestionMove: { delta in
+                        suggestionIndex = (suggestionIndex + delta + suggestions.count) % max(suggestions.count, 1)
+                    },
+                    onSuggestionAccept: {
+                        let pick = suggestions[min(suggestionIndex, suggestions.count - 1)]
+                        // Return on an already complete name runs it instead of re-completing.
+                        guard draft.trimmingCharacters(in: .whitespaces) != "/\(pick.name)" else { return false }
+                        accept(pick)
+                        return true
+                    },
+                    onSuggestionDismiss: { suggestionsDismissed = true },
+                    onSend: send
+                ) {
                     app.chat.stop(conversation)
                 }
             }
             .background(Theme.header)
             .overlay(alignment: .top) { Theme.border.frame(height: 1) }
         }
+        .onChange(of: draft) { _, text in
+            suggestionIndex = 0
+            commandError = nil
+            if !text.hasPrefix("/") { suggestionsDismissed = false }
+        }
         .navigationTitle(conversation.title)
         .focusedSceneValue(\.activeConversation, conversation)
     }
 
+    private var completion: CommandCompletion {
+        CommandCompletion(registry: app.commands.registry, text: draft, dismissed: suggestionsDismissed)
+    }
+
+    private func accept(_ command: CommandSpec) {
+        draft = CommandCompletion.accepted(command)
+        suggestionsDismissed = false
+    }
+
     private func send() {
+        if let outcome = app.runCommand(draft, in: conversation, context: context, onRedirect: { app.requestedConversation = $0.persistentModelID }) {
+            if case .failed(let message) = outcome {
+                commandError = message
+                return
+            }
+            draft = ""
+            return
+        }
         app.send(draft, in: conversation, context: context)
         draft = ""
     }

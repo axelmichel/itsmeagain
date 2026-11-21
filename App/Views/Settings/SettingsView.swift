@@ -18,6 +18,9 @@ struct SettingsView: View {
             Tab("Knowledge", systemImage: "books.vertical") {
                 KnowledgeSettings()
             }
+            Tab("Commands", systemImage: "command") {
+                CommandSettings()
+            }
         }
         .frame(width: 620)
         .task { await app.refreshModels() }
@@ -30,6 +33,15 @@ private struct GeneralSettings: View {
     var body: some View {
         @Bindable var app = app
         Form {
+            Section {
+                OpenAtLoginToggle()
+            } header: {
+                Text("App")
+            } footer: {
+                Text("Keeps the quick panel and automations available. Install the app in /Applications first (make install).")
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 LabeledContent("Shortcut") {
                     ShortcutRecorder(shortcut: $app.quickPanelShortcut) { app.suspendHotKey($0) }
@@ -70,7 +82,7 @@ private struct GeneralSettings: View {
             WebSearchSection()
         }
         .formStyle(.grouped)
-        .frame(height: 680)
+        .frame(height: 760)
     }
 }
 
@@ -118,6 +130,38 @@ private struct WebSearchSection: View {
             "Get a key at brave.com/search/api (free tier available). Stored in the Keychain. Falls back to Wikipedia on errors."
         case .ollama:
             "Uses an ollama.com API key. Stored in the Keychain. Falls back to Wikipedia on errors."
+        }
+    }
+}
+
+private struct OpenAtLoginToggle: View {
+    @State private var enabled = LoginItem.isEnabled
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("Open at Login", isOn: Binding(
+                get: { enabled },
+                set: { value in
+                    do {
+                        try LoginItem.set(value)
+                        error = nil
+                    } catch {
+                        self.error = error.localizedDescription
+                    }
+                    enabled = LoginItem.isEnabled
+                }
+            ))
+            if LoginItem.needsApproval {
+                Text("Approve ItsMeAgain in System Settings → General → Login Items.")
+                    .font(.callout).foregroundStyle(.orange)
+            } else if !LoginItem.runsFromApplications {
+                Text("This copy runs from \(Bundle.main.bundleURL.deletingLastPathComponent().path); it would be registered from there.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            if let error {
+                Text(error).font(.callout).foregroundStyle(.red)
+            }
         }
     }
 }

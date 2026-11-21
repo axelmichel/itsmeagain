@@ -18,6 +18,9 @@ public struct SearchDocumentsTool: Tool {
         self.collections = collections
     }
 
+    /// The user's own files.
+    public var dataClass: ToolDataClass { .private }
+
     public var spec: ToolSpec {
         ToolSpec(
             name: "search_documents",

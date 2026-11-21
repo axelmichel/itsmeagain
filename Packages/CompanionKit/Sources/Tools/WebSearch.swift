@@ -31,6 +31,9 @@ public struct WebSearchTool: Tool {
         self.maxResults = maxResults
     }
 
+    /// The query goes to the search backend.
+    public var sendsDataExternally: Bool { true }
+
     public var spec: ToolSpec {
         ToolSpec(
             name: "web_search",

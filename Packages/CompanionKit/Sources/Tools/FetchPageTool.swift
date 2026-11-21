@@ -16,6 +16,9 @@ public struct FetchPageTool: Tool {
         self.session = session
     }
 
+    /// The URL (which the model chooses) is requested from the internet.
+    public var sendsDataExternally: Bool { true }
+
     public var spec: ToolSpec {
         ToolSpec(
             name: "fetch_page",

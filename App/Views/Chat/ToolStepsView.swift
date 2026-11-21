@@ -23,7 +23,9 @@ private struct ToolStepRow: View {
     @State private var expanded = false
 
     var body: some View {
-        if step.sources.isEmpty && step.error == nil {
+        if step.status == .awaitingApproval {
+            ApprovalCard(step: step)
+        } else if step.sources.isEmpty && step.error == nil {
             label
         } else {
             DisclosureGroup(isExpanded: $expanded) {
@@ -46,7 +48,7 @@ private struct ToolStepRow: View {
     private var label: some View {
         HStack(spacing: 6) {
             switch step.status {
-            case .running: ProgressView().controlSize(.mini)
+            case .running, .awaitingApproval: ProgressView().controlSize(.mini)
             case .done: Image(systemName: icon)
             case .failed: Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
             }
@@ -60,6 +62,7 @@ private struct ToolStepRow: View {
         switch step.tool {
         case "web_search": "magnifyingglass"
         case "fetch_page": "doc.text"
+        case "search_documents": "folder"
         default: "wrench.and.screwdriver"
         }
     }
@@ -69,6 +72,7 @@ private struct ToolStepRow: View {
         switch step.tool {
         case "web_search": return "\(running ? "Searching" : "Searched") “\(step.subject)”"
         case "fetch_page": return "\(running ? "Reading" : "Read") \(SourceLink.shortURL(step.subject))"
+        case "search_documents": return "\(running ? "Searching" : "Searched") your documents for “\(step.subject)”"
         default: return "\(running ? "Running" : "Ran") \(step.tool)"
         }
     }
@@ -97,5 +101,32 @@ struct SourceLink: View {
         guard let url = URL(string: string), let host = url.host() else { return string }
         let path = url.path() == "/" ? "" : url.path()
         return (host.hasPrefix("www.") ? String(host.dropFirst(4)) : host) + path
+    }
+}
+
+/// A write the assistant wants to make: nothing happens until the user approves.
+private struct ApprovalCard: View {
+    let step: ToolStep
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Needs your approval", systemImage: "hand.raised")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.primary)
+            Text(step.approvalSummary ?? step.tool)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+            HStack(spacing: 8) {
+                Button("Approve") { app.approvals.resolve(step.id, granted: true) }
+                    .keyboardShortcut(.defaultAction)
+                Button("Deny") { app.approvals.resolve(step.id, granted: false) }
+            }
+            .controlSize(.small)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.selection)
+        .overlay(alignment: .leading) { Theme.accent.frame(width: 2) }
     }
 }

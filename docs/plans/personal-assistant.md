@@ -1,6 +1,6 @@
 # Plan: Personal assistant (iteration 2)
 
-Status: draft for review · Updated: 2026-11-21
+Status: 2.1 implemented (awaiting review) · Updated: 2026-11-21
 
 ## 1. Goal
 
@@ -220,15 +220,20 @@ today?" → same data via tools).
 
   ```markdown
   ---
-  name: standup
-  summary: Draft my stand-up from yesterday's notes and today's calendar
-  arguments: [{ name: focus, hint: "optional focus", required: false }]
-  task: chat
-  tools: [calendar_events, search_notes, list_tasks]
+  description: Draft my stand-up from yesterday's notes and today's calendar
+  argument-hint: [focus]
+  task: chat                     # chat (default), translate, research, code
+  tools: calendar_events, search_notes
+  auto-approve: create_reminder  # write tools that may run without asking
+  aliases: su
   ---
   Using my notes from {{date:-1d}} and today's calendar, draft a short stand-up update
   (yesterday / today / blockers). Focus: $ARGUMENTS
   ```
+
+  The command name is the file name (`standup.md` → `/standup`). The keys follow Claude Code's
+  custom-command format (`description`, `argument-hint`); `scope: personal|general` and
+  `override: true` (replace a built-in) are optional. ` # ` starts a comment.
 
 - Placeholders: `$ARGUMENTS`, `$1…`, `{{today}}`, `{{now}}`, `{{date:+1d}}`; natural dates in
   arguments ("tomorrow 9am", "morgen 9 Uhr") via `NSDataDetector`.

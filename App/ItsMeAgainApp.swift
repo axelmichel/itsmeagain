@@ -21,6 +21,7 @@ struct ItsMeAgainApp: App {
         }
         let app = AppModel()
         app.installQuickPanel(container: container)
+        app.installAssistant(container: container)
         _app = State(initialValue: app)
     }
 

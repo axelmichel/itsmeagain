@@ -134,7 +134,8 @@ public struct TaskRouter: Sendable {
 
     public static let classifierInstructions = """
         Classify the user's message into exactly one task:
-        - chat: conversation, questions, advice, writing or summarising text
+        - chat: conversation, questions, advice, writing or summarising text, and anything about the user's \
+          own life: calendar, appointments, reminders, mail, notes, plans ("my calendar", "meine Termine", "remind me")
         - translate: the user wants text translated into another language
         - research: needs investigation, facts, comparisons, current information or sources
         - code: programming, code, scripts, debugging, software tools

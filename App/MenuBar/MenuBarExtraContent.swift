@@ -40,12 +40,17 @@ struct MenuBarLabel: View {
 
 struct MenuBarMenu: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Button("Quick Ask" + (app.quickPanelShortcut.map { "  \($0.displayString)" } ?? "")) {
             app.quickPanel?.show()
         }
-        Button("Open ItsMeAgain") { app.openMainWindow() }
+        Button("Open ItsMeAgain") {
+            // This view's own openWindow also recreates a main window the user closed.
+            app.openWindowAction = openWindow
+            app.openMainWindow()
+        }
         SettingsLink { Text("Settings…") }
         Divider()
         Button("Quit ItsMeAgain") { NSApp.terminate(nil) }

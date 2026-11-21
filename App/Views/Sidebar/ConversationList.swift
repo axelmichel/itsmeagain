@@ -8,8 +8,6 @@ import SwiftUI
 /// sit under the task of their latest message. ↑/↓ move through visible rows, ⌫ deletes.
 struct ConversationList: View {
     @Binding var selection: Conversation?
-    let onNew: () -> Void
-    let onToggleSidebar: () -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.modelContext) private var context
     @Query(sort: \Conversation.updatedAt, order: .reverse) private var conversations: [Conversation]
@@ -54,15 +52,7 @@ struct ConversationList: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Spacer()
-                HeaderButton("Hide Sidebar", systemImage: "sidebar.left", action: onToggleSidebar)
-                HeaderButton("New Chat", systemImage: "square.and.pencil", action: onNew)
-            }
-            .padding(.horizontal, 12)
-            .headerBar()
-
-            // Full-width search row directly under the header bar.
+            // Full-width search row under the header and mode bar.
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .font(.caption)
@@ -108,7 +98,6 @@ struct ConversationList: View {
                 if let selection { delete(selection) }
             }
         }
-        .background(Theme.sidebar)
     }
 
     private func move(by offset: Int) -> KeyPress.Result {

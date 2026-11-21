@@ -4,14 +4,20 @@ import SwiftUI
 struct ModelPicker: View {
     var title = "Model"
     @Binding var selection: ModelRef
+    /// Only offer providers that run locally (for tasks that see private data).
+    var localOnly = false
     @Environment(AppModel.self) private var app
+
+    private var providers: [ProviderConfig] {
+        app.enabledProviders.filter { !localOnly || $0.isLocal }
+    }
 
     var body: some View {
         Picker(title, selection: $selection) {
             if !app.isAvailable(selection) {
                 Text("\(selection.model) — \(app.displayName(for: selection.provider)) (unavailable)").tag(selection)
             }
-            ForEach(app.enabledProviders) { config in
+            ForEach(providers) { config in
                 if let models = app.models[config.id], !models.isEmpty {
                     Section(config.name) {
                         ForEach(models) { model in

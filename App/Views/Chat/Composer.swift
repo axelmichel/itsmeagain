@@ -10,6 +10,12 @@ struct Composer: View {
     @Binding var text: String
     let height: Double
     let isStreaming: Bool
+    /// Number of visible `/` suggestions; when > 0, ↑/↓/Tab/Return/Esc drive the list.
+    var suggestionCount = 0
+    var onSuggestionMove: (Int) -> Void = { _ in }
+    /// Returns true if a suggestion was inserted (Return then doesn't send).
+    var onSuggestionAccept: () -> Bool = { false }
+    var onSuggestionDismiss: () -> Void = {}
     let onSend: () -> Void
     let onStop: () -> Void
     @FocusState private var focused: Bool
@@ -26,6 +32,10 @@ struct Composer: View {
                     .scrollContentBackground(.hidden)
                     .focused($focused)
                     .onKeyPress(.return, phases: .down, action: handleReturn)
+                    .onKeyPress(.upArrow) { suggestionKey { onSuggestionMove(-1) } }
+                    .onKeyPress(.downArrow) { suggestionKey { onSuggestionMove(1) } }
+                    .onKeyPress(.tab) { suggestionCount > 0 && onSuggestionAccept() ? .handled : .ignored }
+                    .onKeyPress(.escape) { suggestionKey(onSuggestionDismiss) }
                 if text.isEmpty {
                     Text("Message")
                         .foregroundStyle(.tertiary)
@@ -62,7 +72,14 @@ struct Composer: View {
         // Newline on Shift/Option-Return, and let input methods confirm marked text (e.g. Japanese).
         if press.modifiers.contains(.shift) || press.modifiers.contains(.option) { return .ignored }
         if (NSApp.keyWindow?.firstResponder as? NSTextView)?.hasMarkedText() == true { return .ignored }
+        if suggestionCount > 0 && onSuggestionAccept() { return .handled }
         if canSend { onSend() }
+        return .handled
+    }
+
+    private func suggestionKey(_ action: () -> Void) -> KeyPress.Result {
+        guard suggestionCount > 0 else { return .ignored }
+        action()
         return .handled
     }
 }

@@ -78,6 +78,17 @@ final class AppModel {
     private(set) var isLoadingModels = false
 
     let chat = ChatController()
+    let approvals = ApprovalCenter()
+    let commands = CommandCenter()
+    @ObservationIgnored let notifier = Notifier()
+    @ObservationIgnored private(set) var scheduler: AutomationScheduler?
+
+    enum SidebarMode: String { case chats, automations }
+
+    /// What the sidebar lists (persisted).
+    var sidebarMode: SidebarMode = SidebarMode(rawValue: UserDefaults.standard.string(forKey: "sidebarMode") ?? "") ?? .chats {
+        didSet { UserDefaults.standard.set(sidebarMode.rawValue, forKey: "sidebarMode") }
+    }
     let knowledge: KnowledgeModel
 
     // MARK: Quick panel & windows
@@ -141,6 +152,23 @@ final class AppModel {
         registerHotKey()
     }
 
+    /// Automations and notifications (clicking a notification opens its conversation).
+    func installAssistant(container: ModelContainer) {
+        notifier.onOpenConversation = { [weak self] id in
+            guard let self,
+                let conversation = try? container.mainContext.fetch(
+                    FetchDescriptor<Conversation>(predicate: #Predicate { $0.id == id })
+                ).first
+            else { return }
+            sidebarMode = .chats
+            requestedConversation = conversation.persistentModelID
+            openMainWindow()
+        }
+        let scheduler = AutomationScheduler(app: self, container: container, notifier: notifier)
+        self.scheduler = scheduler
+        scheduler.start()
+    }
+
     /// Temporarily off while the user records a new shortcut.
     func suspendHotKey(_ suspended: Bool) {
         suspended ? hotKey?.unregister() : registerHotKey()
@@ -156,9 +184,10 @@ final class AppModel {
         }
     }
 
+    /// Brings the main window forward, recreating it if the user closed it.
     func openMainWindow() {
         NSApp.activate()
-        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }) {
+        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true && $0.isVisible }) {
             window.makeKeyAndOrderFront(nil)
         } else {
             openWindowAction?(id: "main")
@@ -269,7 +298,11 @@ final class AppModel {
     }
 
     func makeTools(for profile: TaskProfile) -> [any Tool] {
-        profile.tools.compactMap { name -> (any Tool)? in
+        makeTools(named: profile.tools)
+    }
+
+    func makeTools(named names: [String]) -> [any Tool] {
+        names.compactMap { name -> (any Tool)? in
             switch name {
             case TaskProfile.ToolName.webSearch:
                 // Self-hosted or keyed backends can be offline; Wikipedia always answers.
@@ -308,25 +341,39 @@ final class AppModel {
         lastAuto = true
     }
 
-    func send(_ text: String, in conversation: Conversation, context: ModelContext) {
-        chat.send(text, in: conversation, context: context) { [self] in
+    /// Sends a message (or, with `command`, a command's expanded prompt) through the normal turn pipeline.
+    func send(_ text: String, in conversation: Conversation, context: ModelContext, command: CommandInvocation? = nil) {
+        chat.send(text, modelText: command?.modelText, in: conversation, context: context) { [self] in
             var targetLanguage = targetLanguage(for: conversation)
-            if conversation.autoRoute {
+            if let command {
+                // Commands name their task; no routing.
+                conversation.task = command.task
+            } else if conversation.autoRoute {
                 let decision = await router.route(text)
                 conversation.task = decision.task
                 if let language = decision.targetLanguage { targetLanguage = language }
             }
             let ref = effectiveModel(for: conversation)
-            guard let provider = provider(for: ref.provider) else {
+            guard let config = config(for: ref.provider), let provider = provider(for: ref.provider) else {
                 throw ProviderError.unavailable("\(displayName(for: ref.provider)) is disabled or not configured (Settings → Providers).")
             }
             let profile = taskProfiles[conversation.task]
+            // Chat is the personal assistant: it sees private data, so it never runs on a cloud model.
+            if profile.localOnly && !config.isLocal {
+                throw ProviderError.unavailable(
+                    "\(conversation.task.title) runs on local models only. Choose a local model in Settings → Tasks → \(conversation.task.title)."
+                )
+            }
+            let approvals = approvals
             return TurnPlan(
                 provider: provider,
                 profile: profile,
                 model: ref.model,
                 targetLanguage: targetLanguage,
-                tools: makeTools(for: profile)
+                tools: makeTools(named: command?.tools ?? profile.tools),
+                policy: ToolPolicy(providerIsLocal: config.isLocal, autoApproved: command?.autoApproved ?? []) { request in
+                    await approvals.request(request)
+                }
             )
         }
     }

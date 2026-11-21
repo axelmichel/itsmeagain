@@ -243,7 +243,16 @@ struct EchoTool: Tool {
         #expect(profiles[.research].modelID == "my-model")
         #expect(profiles[.research].systemPrompt == "custom")
         #expect(profiles[.research].tools == ["web_search", "fetch_page", "search_documents"])
-        #expect(profiles[.chat].tools == [])
+        #expect(profiles[.chat].tools == ["search_documents"])
+    }
+
+    @Test func chatIsLocalOnlyAndStoredProfilesCannotDisableIt() throws {
+        #expect(TaskProfiles.defaults[.chat].localOnly)
+        #expect(!TaskProfiles.defaults[.code].localOnly)
+        let stored = #"[{"task":"chat","providerID":"anthropic","modelID":"claude-opus-5-5","systemPrompt":"x","includesHistory":true,"tools":[],"localOnly":false}]"#
+        let profiles = try JSONDecoder().decode(TaskProfiles.self, from: Data(stored.utf8))
+        #expect(profiles[.chat].localOnly, "localOnly is not user-editable")
+        #expect(profiles[.chat].providerID.rawValue == "anthropic", "the (invalid) mapping is kept and rejected at send time")
     }
 
     @Test func datePlaceholderIsFilled() {

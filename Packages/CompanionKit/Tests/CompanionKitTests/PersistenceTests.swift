@@ -23,6 +23,11 @@ import Testing
 
         #expect(conversation.orderedMessages.map(\.order) == [0, 1, 2, 3])
         #expect(conversation.chatMessages == [.user("one"), .assistant("two"), .user("three")])
+
+        // Commands: the transcript shows what was typed, the model gets the expanded prompt.
+        conversation.append(role: .user, content: "/standup API").modelContent = "Draft my stand-up. Focus: API"
+        #expect(conversation.orderedMessages.last?.content == "/standup API")
+        #expect(conversation.chatMessages.last == .user("Draft my stand-up. Focus: API"))
     }
 }
 

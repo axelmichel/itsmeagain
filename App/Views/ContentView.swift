@@ -8,25 +8,49 @@ struct ContentView: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.modelContext) private var context
+    @Environment(\.openWindow) private var openWindow
     @State private var selection: Conversation?
+    @State private var automation: Automation?
     @AppStorage("sidebarVisible") private var sidebarVisible = true
     @AppStorage("sidebarWidth") private var sidebarWidth = 260.0
 
     var body: some View {
         HStack(spacing: 0) {
             if sidebarVisible {
-                ConversationList(selection: $selection, onNew: newConversation, onToggleSidebar: toggleSidebar)
-                    .frame(width: sidebarWidth)
+                Sidebar(
+                    conversation: $selection,
+                    automation: $automation,
+                    onNewChat: newConversation,
+                    onNewAutomation: newAutomation,
+                    onToggleSidebar: toggleSidebar
+                )
+                .frame(width: sidebarWidth)
                 SidebarResizer(width: $sidebarWidth)
             }
             VStack(spacing: 0) {
                 DetailHeader(
-                    title: selection?.title ?? "ItsMeAgain",
+                    title: app.sidebarMode == .automations ? automation?.name ?? "Automations" : selection?.title ?? "ItsMeAgain",
                     showsSidebarControls: !sidebarVisible,
                     onToggleSidebar: toggleSidebar,
-                    onNew: newConversation
+                    onNew: app.sidebarMode == .automations ? newAutomation : newConversation
                 )
-                if let selection {
+                if app.sidebarMode == .automations {
+                    if let automation {
+                        AutomationEditor(automation: automation, onDelete: deleteAutomation, onOpenConversation: openConversation)
+                            .id(automation.persistentModelID)
+                    } else {
+                        ContentUnavailableView {
+                            Label("No Automation", systemImage: "clock.arrow.circlepath")
+                        } description: {
+                            Text("Schedule a command or prompt, e.g. a summary every weekday morning.")
+                        } actions: {
+                            Button("New Automation", action: newAutomation)
+                                .buttonStyle(.borderless)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Theme.canvas)
+                    }
+                } else if let selection {
                     ChatView(conversation: selection)
                         .id(selection.persistentModelID)
                 } else {
@@ -54,11 +78,36 @@ struct ContentView: View {
             .hidden()
         }
         .task { await app.refreshModels() }
+        // Lets the quick panel and menu bar reopen this window after it was closed.
+        .onAppear { app.openWindowAction = openWindow }
         .onChange(of: app.requestedConversation, initial: true) { _, id in
             guard let id, let conversation = context.model(for: id) as? Conversation else { return }
             selection = conversation
             app.requestedConversation = nil
         }
+    }
+
+    private func newAutomation() {
+        let fresh = Automation(name: "New Automation", command: "", trigger: .daily(hour: 7, minute: 30, weekdays: [2, 3, 4, 5, 6]))
+        context.insert(fresh)
+        try? context.save()
+        app.sidebarMode = .automations
+        automation = fresh
+    }
+
+    private func deleteAutomation() {
+        guard let automation else { return }
+        context.delete(automation)
+        try? context.save()
+        self.automation = nil
+    }
+
+    private func openConversation(_ id: UUID) {
+        guard let conversation = try? context.fetch(FetchDescriptor<Conversation>(predicate: #Predicate { $0.id == id })).first else {
+            return
+        }
+        app.sidebarMode = .chats
+        selection = conversation
     }
 
     private func toggleSidebar() {

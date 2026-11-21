@@ -13,6 +13,7 @@ struct TurnPlan {
     var model: String
     var targetLanguage: String
     var tools: [any Tool]
+    var policy: ToolPolicy
 }
 
 /// Runs model turns for conversations. Streams keep running when the user switches conversations.
@@ -25,6 +26,7 @@ final class ChatController {
     struct QueuedMessage: Identifiable {
         let id = UUID()
         var text: String
+        fileprivate let modelText: String?
         fileprivate let context: ModelContext
         fileprivate let plan: Planner
     }
@@ -47,17 +49,18 @@ final class ChatController {
     }
 
     /// Sends now, or queues behind the running reply (and anything already queued).
-    func send(_ text: String, in conversation: Conversation, context: ModelContext, plan: @escaping Planner) {
+    /// `modelText` replaces `text` for the model (e.g. an expanded command); the transcript shows `text`.
+    func send(_ text: String, modelText: String? = nil, in conversation: Conversation, context: ModelContext, plan: @escaping Planner) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         let key = conversation.persistentModelID
         if isStreaming(conversation) || !(queues[key] ?? []).isEmpty {
-            queues[key, default: []].append(QueuedMessage(text: text, context: context, plan: plan))
+            queues[key, default: []].append(QueuedMessage(text: text, modelText: modelText, context: context, plan: plan))
             // Sending while paused means "carry on".
             if !isStreaming(conversation) { resume(conversation) }
             return
         }
-        start(text, in: conversation, context: context, plan: plan)
+        start(text, modelText: modelText, in: conversation, context: context, plan: plan)
     }
 
     func resume(_ conversation: Conversation) {
@@ -81,15 +84,16 @@ final class ChatController {
         let key = conversation.persistentModelID
         guard !isStreaming(conversation), !paused.contains(key), let next = queues[key]?.first else { return }
         queues[key]?.removeFirst()
-        start(next.text, in: conversation, context: next.context, plan: next.plan)
+        start(next.text, modelText: next.modelText, in: conversation, context: next.context, plan: next.plan)
     }
 
     /// Appends the user message right away; `plan` (which may route the message first) runs before streaming.
-    private func start(_ text: String, in conversation: Conversation, context: ModelContext, plan: @escaping Planner) {
+    private func start(_ text: String, modelText: String?, in conversation: Conversation, context: ModelContext, plan: @escaping Planner) {
         if conversation.messages.isEmpty {
             conversation.title = Self.title(for: text)
         }
         let prompt = conversation.append(role: .user, content: text)
+        prompt.modelContent = modelText
         let reply = conversation.append(role: .assistant, content: "")
         try? context.save()
 
@@ -106,7 +110,7 @@ final class ChatController {
                     model: plan.model,
                     targetLanguage: plan.targetLanguage
                 )
-                let loop = ToolLoop(provider: plan.provider, tools: plan.tools)
+                let loop = ToolLoop(provider: plan.provider, tools: plan.tools, policy: plan.policy)
                 for try await event in loop.run(request) {
                     switch event {
                     case .text(let delta):
@@ -118,9 +122,16 @@ final class ChatController {
                         if !reply.content.isEmpty && !reply.content.hasSuffix("\n\n") { reply.content += "\n\n" }
                     case .toolStarted(let call):
                         reply.toolSteps.append(ToolStep(id: call.id, tool: call.name, subject: Self.subject(of: call)))
+                    case .approvalRequested(let request):
+                        updateStep(request.id, in: reply) {
+                            $0.status = .awaitingApproval
+                            $0.approvalSummary = request.summary
+                        }
+                    case .approvalResolved(let id, let granted):
+                        if granted { updateStep(id, in: reply) { $0.status = .running } }
                     case .toolFinished(let id, let output, let error):
                         var steps = reply.toolSteps
-                        if let index = steps.firstIndex(where: { $0.id == id && $0.status == .running }) {
+                        if let index = steps.firstIndex(where: { $0.id == id && ($0.status == .running || $0.status == .awaitingApproval) }) {
                             steps[index].status = error == nil ? .done : .failed
                             steps[index].error = error
                             steps[index].sources = output?.sources ?? []
@@ -136,10 +147,10 @@ final class ChatController {
                 reply.errorText = error.localizedDescription
             }
             // A cancelled turn can leave steps that never finished.
-            if reply.toolSteps.contains(where: { $0.status == .running }) {
+            if reply.toolSteps.contains(where: { $0.status == .running || $0.status == .awaitingApproval }) {
                 reply.toolSteps = reply.toolSteps.map { step in
                     var step = step
-                    if step.status == .running { step.status = .failed; step.error = "Stopped" }
+                    if step.status == .running || step.status == .awaitingApproval { step.status = .failed; step.error = "Stopped" }
                     return step
                 }
             }
@@ -156,6 +167,13 @@ final class ChatController {
 
     func stop(_ conversation: Conversation) {
         tasks[conversation.persistentModelID]?.cancel()
+    }
+
+    private func updateStep(_ id: String, in message: StoredMessage, _ change: (inout ToolStep) -> Void) {
+        var steps = message.toolSteps
+        guard let index = steps.firstIndex(where: { $0.id == id }) else { return }
+        change(&steps[index])
+        message.toolSteps = steps
     }
 
     private static func subject(of call: ToolCall) -> String {

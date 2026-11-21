@@ -30,7 +30,7 @@ struct TaskSettings: View {
                             profile.wrappedValue.providerID = $0.provider
                             profile.wrappedValue.modelID = $0.model
                         }
-                    ))
+                    ), localOnly: profile.wrappedValue.localOnly)
                     Picker("Thinking", selection: profile.think) {
                         Text("Model Default").tag(Bool?.none)
                         Text("On").tag(Bool?.some(true))
@@ -63,8 +63,14 @@ struct TaskSettings: View {
                 } header: {
                     Text("Model")
                 } footer: {
-                    if let note = providerNote(for: profile.wrappedValue) {
-                        Text(note).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if profile.wrappedValue.localOnly {
+                            Text("Chat is your personal assistant and sees private data, so it only runs on local models.")
+                                .foregroundStyle(.secondary)
+                        }
+                        if let note = providerNote(for: profile.wrappedValue) {
+                            Text(note).foregroundStyle(.secondary)
+                        }
                     }
                 }
 
