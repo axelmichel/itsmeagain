@@ -168,6 +168,30 @@ extension NoteStore {
         }
     }
 
+    /// A typed folder name made safe: one level, no path characters, nothing Obsidian dislikes.
+    public static func topicFolderName(_ raw: String) -> String? {
+        let cleaned = raw
+            .replacingOccurrences(of: "second-brain/", with: "")
+            .replacingOccurrences(of: #"[\\/:*?"<>|#^\[\]]"#, with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: " .-"))
+        guard !cleaned.isEmpty, cleaned.count <= 60, cleaned != "..", !cleaned.hasPrefix(".") else { return nil }
+        return cleaned
+    }
+
+    /// Creates a topic folder directly under `second-brain/` (only there; existing is fine).
+    public func createTopicFolder(_ folder: String) throws {
+        guard folder.hasPrefix("second-brain/"), let name = Self.topicFolderName(String(folder.dropFirst("second-brain/".count))),
+            "second-brain/" + name == folder
+        else { throw VaultError.invalid("New folders can only be created directly under second-brain/.") }
+        let url = try resolve(folder)
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+            guard isDirectory.boolValue else { throw VaultError.invalid("“\(folder)” exists but isn't a folder.") }
+            return
+        }
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+    }
+
     /// Moves a note out of `Clippings/` into a topic folder under `second-brain/`. Never overwrites,
     /// never anywhere else — the only move the app makes in a vault.
     @discardableResult

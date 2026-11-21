@@ -188,6 +188,12 @@ struct SortPlanView: View {
             }
         }
         applying = false
+        let created = Set(chosen.filter { $0.newFolder == true }.compactMap(\.folder))
+        if !created.isEmpty {
+            message.content += "\n\nNew \(created.count == 1 ? "folder" : "folders"): \(created.sorted().joined(separator: ", ")). "
+                + "Home.md and the folder list in CLAUDE.md weren't changed — add \(created.count == 1 ? "it" : "them") there if you want it in your overview."
+            try? context.save()
+        }
     }
 
     private func update(_ id: String, _ change: (inout SortProposal) -> Void) {
@@ -210,8 +216,24 @@ private struct ProposalRow: View {
     let onChange: ((inout SortProposal) -> Void) -> Void
     let onSkip: () -> Void
     @State private var blurb = ""
+    @State private var naming = false
+    @State private var newName = ""
+
+    private static let newFolderTag = "__new__"
 
     private var editable: Bool { proposal.status == .pending || proposal.status == .failed }
+
+    /// The folder is only created on Apply (in second-brain/), so a discarded idea leaves nothing behind.
+    private func createName() {
+        guard let name = NoteStore.topicFolderName(newName) else { return }
+        let path = "second-brain/" + name
+        let exists = folders.contains(path)
+        onChange {
+            $0.folder = path
+            $0.newFolder = exists ? nil : true
+        }
+        naming = false
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -235,14 +257,41 @@ private struct ProposalRow: View {
                     Label("Duplicate of \(proposal.duplicates.joined(separator: ", ")) — stays in Clippings/", systemImage: "doc.on.doc")
                         .font(.caption).foregroundStyle(.orange)
                 }
-                Picker("Folder", selection: Binding(
-                    get: { proposal.folder ?? "" },
-                    set: { value in onChange { $0.folder = value.isEmpty ? nil : value } }
-                )) {
-                    Text("Unsure — choose a folder").tag("")
-                    ForEach(folders, id: \.self) { Text($0.replacingOccurrences(of: "second-brain/", with: "")).tag($0) }
+                HStack {
+                    Picker("Folder", selection: Binding(
+                        get: { naming ? Self.newFolderTag : (proposal.folder ?? "") },
+                        set: { value in
+                            if value == Self.newFolderTag {
+                                naming = true
+                                newName = ""
+                            } else {
+                                naming = false
+                                onChange {
+                                    $0.folder = value.isEmpty ? nil : value
+                                    $0.newFolder = nil
+                                }
+                            }
+                        }
+                    )) {
+                        Text("Unsure — choose a folder").tag("")
+                        ForEach(folders, id: \.self) { Text($0.replacingOccurrences(of: "second-brain/", with: "")).tag($0) }
+                        if proposal.newFolder == true, let folder = proposal.folder, !folders.contains(folder) {
+                            Text(folder.replacingOccurrences(of: "second-brain/", with: "") + " (new)").tag(folder)
+                        }
+                        Divider()
+                        Text("New folder…").tag(Self.newFolderTag)
+                    }
+                    .frame(maxWidth: 360)
+                    if naming {
+                        TextField("Folder name", text: $newName)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 200)
+                            .onSubmit(createName)
+                        Button("OK", action: createName).disabled(NoteStore.topicFolderName(newName) == nil)
+                    } else if proposal.newFolder == true {
+                        Text("created when you apply").font(.caption).foregroundStyle(Theme.accent)
+                    }
                 }
-                .frame(maxWidth: 360)
                 HStack(alignment: .firstTextBaseline) {
                     Text("Blurb\(proposal.blurbIsNew ? " (new)" : "")").font(.caption).foregroundStyle(.secondary).frame(width: 74, alignment: .leading)
                     TextField("One sentence, English", text: $blurb, axis: .vertical)

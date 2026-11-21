@@ -149,3 +149,37 @@ struct ClippingsLiveTests {
         #expect(!conventions.topicFolders.isEmpty && !conventions.tags.isEmpty)
     }
 }
+
+@Suite struct NewTopicFolderTests {
+    @Test func namesAreMadeSafe() {
+        #expect(NoteStore.topicFolderName("Swift") == "Swift")
+        #expect(NoteStore.topicFolderName("second-brain/Home Lab") == "Home Lab")
+        #expect(NoteStore.topicFolderName("AI: Agents/MCP") == "AI- Agents-MCP")
+        #expect(NoteStore.topicFolderName("..") == nil)
+        #expect(NoteStore.topicFolderName("  ") == nil)
+    }
+
+    @Test func createsOnlyDirectlyUnderSecondBrainAndOnApply() throws {
+        let vault = try FixtureVault(files: [
+            "Clippings/Swift Testing.md": "---\ntitle: Swift Testing\n---\n# Swift Testing\n", "second-brain/Rust/R.md": "r",
+        ])
+        defer { vault.remove() }
+        #expect(throws: VaultError.self) { try vault.store.createTopicFolder("Projects/New") }
+        #expect(throws: VaultError.self) { try vault.store.createTopicFolder("second-brain/A/B") }
+        try vault.store.createTopicFolder("second-brain/Rust")  // existing is fine
+
+        let proposal = SortProposal(
+            path: "Clippings/Swift Testing.md", title: "Swift Testing", url: nil, folder: "second-brain/Swift", newFolder: true,
+            tags: [], blurb: "", blurbIsNew: false, related: [], duplicates: [], status: .pending
+        )
+        #expect(!FileManager.default.fileExists(atPath: vault.root.appending(path: "second-brain/Swift").path), "nothing before Apply")
+        let moved = try ClippingSorter.apply(proposal, store: vault.store)
+        #expect(moved == "second-brain/Swift/Swift Testing.md" && vault.text(moved) != nil)
+    }
+
+    @Test func oldPlansStillDecode() throws {
+        let json = #"{"path":"Clippings/a.md","title":"a","tags":[],"blurb":"","blurbIsNew":false,"related":[],"duplicates":[],"status":"pending"}"#
+        let proposal = try JSONDecoder().decode(SortProposal.self, from: Data(json.utf8))
+        #expect(proposal.newFolder == nil && proposal.folder == nil)
+    }
+}
