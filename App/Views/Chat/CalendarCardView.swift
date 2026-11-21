@@ -70,11 +70,17 @@ struct CalendarCardView: View {
                 .padding(.vertical, 6)
             }
             if let error {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                    Text(error).font(.caption)
+                    Spacer()
+                    if !EventKitStore.eventsAuthorized {
+                        Button("Allow Access…", action: requestAccess)
+                            .font(.caption)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
             }
         }
         .background(Theme.field)
@@ -205,9 +211,22 @@ struct CalendarCardView: View {
         }
     }
 
+    private func requestAccess() {
+        Task {
+            _ = await EventKitStore.shared.requestAccess()
+            if !EventKitStore.eventsAuthorized, let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+                NSWorkspace.shared.open(url)
+            }
+            await load()
+        }
+    }
+
     private func load() async {
         guard EventKitStore.eventsAuthorized else {
-            error = PersonalDataError.accessDenied("your calendars").localizedDescription
+            // Make "no access" unmistakable; an empty grid would look like an empty calendar.
+            monthEvents = []
+            events = []
+            error = "ItsMeAgain has no access to your calendars right now, so nothing can be shown."
             return
         }
         do {

@@ -113,10 +113,10 @@ struct AppointmentMailLiveTests {
         let source = AppleMailSource()
         let provider = OllamaProviderForTests.make()
         var started = ContinuousClock.now
-        let messages = try await source.recent(days: 7, unreadOnly: true, limit: 200)
-        print("APPT MAIL LIVE: \(messages.count) unread (7 days) listed in \(ContinuousClock.now - started)")
+        let messages = try await source.recent(days: 7, unreadOnly: ProcessInfo.processInfo.environment["MAIL_UNREAD_ONLY"] == "1", limit: 150)
+        print("APPT MAIL LIVE: \(messages.count) mails (7 days) listed in \(ContinuousClock.now - started)")
         started = ContinuousClock.now
-        var invitations = 0, candidates = 0, proposals = 0, read = 0
+        var invitations = 0, candidates = 0, proposals = 0, read = 0, withICS = 0
         for start in stride(from: 0, to: messages.count, by: 10) {
             let batch = Array(messages[start..<min(start + 10, messages.count)])
             let sources = try await source.sources(ids: batch.map(\.id))
@@ -124,6 +124,7 @@ struct AppointmentMailLiveTests {
                 guard let raw = sources[message.id] else { continue }
                 read += 1
                 let parsed = MIMEParser.parse(raw)
+                if parsed.calendar != nil { withICS += 1 }
                 let invites = AppointmentFinder.invitations(parsed, mail: message)
                 invitations += invites.count
                 if invites.isEmpty, AppointmentFinder.mightContainAppointment(subject: message.subject, text: parsed.readableText) {
@@ -132,6 +133,6 @@ struct AppointmentMailLiveTests {
                 }
             }
         }
-        print("APPT MAIL LIVE: read \(read) mails in \(ContinuousClock.now - started): \(invitations) invitations, \(candidates) pass the pre-filter, model found \(proposals) appointments in them")
+        print("APPT MAIL LIVE: read \(read) mails in \(ContinuousClock.now - started): \(invitations) future invitations, \(candidates) pass the pre-filter, model found \(proposals) appointments in them; \(withICS) mails carry a calendar file")
     }
 }

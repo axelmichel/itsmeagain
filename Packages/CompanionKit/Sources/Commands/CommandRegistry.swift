@@ -119,7 +119,7 @@ public struct CommandRegistry: Sendable {
     public static let mail: [CommandSpec] = [
         CommandSpec(name: "inbox", summary: "Unread mail of the last two days", argumentHint: "[account]", kind: .native(handler: "inbox"), scope: .personal),
         CommandSpec(
-            name: "appointments", summary: "Find appointments in unread mail, check your time, add them", argumentHint: "[days]",
+            name: "appointments", summary: "Find appointments in last week's mail, check your time, add them", argumentHint: "[days, max 7]",
             kind: .native(handler: "appointments"), scope: .personal
         ),
         CommandSpec(

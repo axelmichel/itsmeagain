@@ -14,7 +14,9 @@ import SwiftData
 final class MailWatcher {
     static let interval: TimeInterval = 5 * 60
     /// Mails read for appointments per check (bodies cost up to a second each, plus the model).
-    static let scanBatch = 25
+    static let scanBatch = 40
+    /// How far back appointments are looked for (read and unread mail).
+    static let appointmentDays = 7
 
     private(set) var isChecking = false
     private(set) var lastCheck: Date? = UserDefaults.standard.object(forKey: "mailWatchLastCheck") as? Date
@@ -67,7 +69,10 @@ final class MailWatcher {
         isChecking = true
         defer { isChecking = false }
         let preferences = app.mailPreferences
-        guard let messages = try? await app.mailSource.recent(days: 7, unreadOnly: true, limit: 200).filter(preferences.includes) else { return }
+        // Read and unread: an invitation you opened but didn't act on is still worth asking about.
+        guard let messages = try? await app.mailSource.recent(days: Self.appointmentDays, unreadOnly: false, limit: 400)
+            .filter(preferences.includes)
+        else { return }
 
         var important: [(address: String, messages: [MailMessage])] = []
         if app.notifyImportantMail {
@@ -199,11 +204,11 @@ final class MailWatcher {
 
     // MARK: On demand
 
-    /// `/appointments`: every unread mail of the last `days` days, regardless of earlier scans.
+    /// `/appointments`: all mail (read and unread) of the last `days` days, regardless of earlier scans.
     func findAppointments(days: Int, progress: @MainActor (Int, Int) -> Void) async throws -> [AppointmentProposal] {
         let preferences = app.mailPreferences
         let rules = app.senderRules
-        let messages = try await app.mailSource.recent(days: days, unreadOnly: true, limit: 300)
+        let messages = try await app.mailSource.recent(days: days, unreadOnly: false, limit: 400)
             .filter { preferences.includes($0) && rules.action(for: $0.senderAddress) != .junk && rules.action(for: $0.senderAddress) != .digest }
         let model = try? app.localMailModel()
         var found: [AppointmentProposal] = []

@@ -152,9 +152,10 @@ private struct MailSettingsSection: View {
                 Reads recent mail from Apple Mail (all accounts configured there) on this Mac only. macOS asks once to \
                 let ItsMeAgain control Mail. Important senders come first in /inbox, /triage and the brief; automated \
                 senders (noreply, newsletters) are summarised in one line. The background check runs every five \
-                minutes: new mail from important senders notifies you (one notification per sender), and appointments \
-                found in mail (invitations, or text read by your local model) are checked against your calendar and \
-                offered with Add / Ignore in the "Mail watch" conversation. Nothing is added without your click.
+                minutes: new unread mail from important senders notifies you (one notification per sender), and \
+                appointments found in the last week's mail, read or unread (invitations, or text read by your local \
+                model), are checked against your calendar and offered once with Add / Ignore in the "Mail watch" \
+                conversation. Nothing is added without your click.
                 """)
             .foregroundStyle(.secondary)
         }

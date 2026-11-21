@@ -56,8 +56,11 @@ targets:
         INFOPLIST_KEY_NSAppleEventsUsageDescription: ItsMeAgain reads your recent mail in Apple Mail for summaries and opens reply drafts you send yourself. Mail never leaves this Mac.
         INFOPLIST_KEY_NSRemindersFullAccessUsageDescription: ItsMeAgain lists your reminders and creates the ones you ask for. Everything stays on this Mac.
         ENABLE_HARDENED_RUNTIME: YES
-        CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_IDENTITY: "-"
+        # A real certificate (not ad-hoc "-"): macOS keeps Calendar, Reminders and Mail permissions
+        # across rebuilds only when every build has the same signing identity.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: 24BR9K5RRD
 
 schemes:
   ItsMeAgain:

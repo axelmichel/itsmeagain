@@ -79,22 +79,22 @@ extension AppModel {
         return .handled
     }
 
-    /// `/appointments [days]`: appointments in unread mail (default: last 14 days), each with your
-    /// free/conflict status and Add / Ignore.
+    /// `/appointments [days]`: appointments in mail of the last week (read and unread; fewer days if
+    /// given), each with your free/conflict status and Add / Ignore.
     func runAppointmentsCommand(input: CommandInput, text: String, in conversation: Conversation, context: ModelContext) -> CommandOutcome {
         guard mailEnabled else { return .failed("Mail is turned off in Settings → Assistant.") }
         guard !chat.isStreaming(conversation) else { return .failed("Wait for the current reply to finish.") }
         guard let watcher = mailWatcher else { return .failed("Mail isn't ready yet.") }
-        let days = input.positional.first.flatMap(Int.init).map { min(max($0, 1), 60) } ?? 14
-        let reply = start(text, in: conversation, context: context, status: "_Reading unread mail…_")
+        let days = input.positional.first.flatMap(Int.init).map { min(max($0, 1), MailWatcher.appointmentDays) } ?? MailWatcher.appointmentDays
+        let reply = start(text, in: conversation, context: context, status: "_Reading mail…_")
         chat.run(in: conversation, context: context) {
             do {
                 let found = try await watcher.findAppointments(days: days) { done, total in
-                    reply.content = "_Reading unread mail… \(done) of \(total)_"
+                    reply.content = "_Reading mail… \(done) of \(total)_"
                 }
                 reply.content = found.isEmpty
-                    ? "No appointments in your unread mail of the last \(days) days."
-                    : "**\(found.count) \(found.count == 1 ? "appointment" : "appointments")** in your unread mail of the last \(days) days:"
+                    ? "No appointments in your mail of the last \(days) days."
+                    : "**\(found.count) \(found.count == 1 ? "appointment" : "appointments")** in your mail of the last \(days) days:"
                 if !found.isEmpty { reply.attachments = [.appointments(found)] }
             } catch {
                 reply.content = ""
