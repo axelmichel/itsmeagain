@@ -65,6 +65,12 @@ struct ContentView: View {
                                 Button("Add Mail Cleanup (/cleanup, hourly)") {
                                     newAutomation(name: "Mail cleanup", command: "/cleanup", trigger: .interval(minutes: 60), notify: false)
                                 }
+                                Button("Add Morning News (/news, weekdays 07:45)") {
+                                    newAutomation(
+                                        name: "Morning news", command: "/news",
+                                        trigger: .daily(hour: 7, minute: 45, weekdays: AutomationTrigger.weekdaysOnly)
+                                    )
+                                }
                                 Button("Add Newsletter Digest (/digest, weekdays 08:00)") {
                                     newAutomation(
                                         name: "Newsletter digest", command: "/digest",

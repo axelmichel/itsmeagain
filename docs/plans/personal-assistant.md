@@ -1,6 +1,6 @@
 # Plan: Personal assistant (iteration 2)
 
-Status: 2.1–2.4 done, 2.5 implemented (awaiting review); Jira planned (docs/plans/jira.md) · Updated: 2026-11-21
+Status: 2.1–2.5 done, 2.6 implemented (awaiting review); Jira planned (docs/plans/jira.md) · Updated: 2026-11-21
 
 ## 1. Goal
 
@@ -446,8 +446,14 @@ test); a remembered preference changes the brief's language/length.
   checkboxes.
 - Measured on the real vault: 394 notes listed in 0.01 s, search 0.1 s, 26 open tasks in 0.9 s;
   `gemma4:26b` picked the right tool 4/4 with 17 personal tools offered.
-- Not yet: vault as a Knowledge (embedding) source, writing the brief into the daily note,
-  user commands from the vault.
+- Added (2026-11-21): meaning-based search — one embedding index per enabled vault
+  (`embeddinggemma`, `VaultIndex/`), built in the background, refreshed every 30 min, only changed
+  notes re-read (first run on the main vault: 397 notes / 2,025 chunks in ≈ 90 s; update 0.01 s);
+  `search_notes` and `/find` merge meaning and word hits. Brief into the daily note: today's
+  events under the Day Planner heading (`- [ ] 09:00 - 10:00 Title`, plugin settings honoured,
+  no duplicates, time order) and the brief in a replaced "Morning brief" section; `/dayplan` on
+  demand. `@vault` prefix for `/note`, `/capture`, `/todos`, `/done`, `/find`.
+- Not yet: user commands from the vault; running the vault's Claude skills (open question).
 
 ### Phase 2.6 — News (RSS)
 
@@ -456,6 +462,18 @@ test); a remembered preference changes the brief's language/length.
   scoring.
 - Tool `news(since?, topics?, limit?)` (wrapped untrusted); commands `/news`, `/digest`; template
   **News digest**; news joins `/brief`.
+
+**Implemented (2026-11-21):**
+- `News` target: RSS 2.0 / RSS 1.0 / Atom parser, OPML import, conditional GET (ETag /
+  Last-Modified), library with dedupe (id and link) and 30-day retention, keyword ranking per
+  interest with synonyms and whole-word matching for short keywords ("ai" ≠ "said").
+- 20 suggested feeds of sources daily.dev aggregates (Swift/iOS, Web/JS/TS, AI), all checked live;
+  stored with the items in `News.json`. Refreshed hourly and before `/news` when older than 30 min.
+- Interests = the digest topics (shared setting) + project subjects from memory.
+- `/news [topic]` (native, links grouped by interest); tool `news` (public, untrusted-wrapped);
+  `/brief` ends with three headlines; template **Morning news** (weekdays 07:45). `/digest` stays
+  the newsletter digest.
+- Measured: 20/20 feeds, 217 items in ≈ 10 s.
 
 ### Phase 2.7 — Optional: MCP client
 

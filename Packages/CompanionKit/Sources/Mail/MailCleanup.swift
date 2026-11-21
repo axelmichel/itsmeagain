@@ -42,20 +42,54 @@ public struct BulkInfo: Codable, Sendable, Hashable {
 }
 
 public enum SenderAction: String, Codable, Sendable, Hashable, CaseIterable {
-    /// Newsletter worth reading: goes into the digest, then read + archived.
-    case digest
-    /// Unwanted: moved to Junk automatically.
-    case junk
+    /// On the watch list: a notification for new mail, always at the top.
+    case important
     /// Leave it alone (personal or wanted as-is).
     case keep
+    /// Newsletter worth reading: goes into the digest, then read + archived.
+    case digest
+    /// Stays in the inbox, marked as read.
+    case markRead
+    /// Archived right away.
+    case archive
+    /// Moved to the trash.
+    case trash
+    /// Unwanted: moved to Junk.
+    case junk
 
     public var title: String {
         switch self {
-        case .digest: "Digest"
-        case .junk: "Junk"
+        case .important: "Important"
         case .keep: "Keep"
+        case .digest: "Digest"
+        case .markRead: "Mark as read"
+        case .archive: "Archive"
+        case .trash: "Delete"
+        case .junk: "Junk"
         }
     }
+
+    /// What the rule does to a message, for the menus ("From now on, mail from Tom: …").
+    public var explanation: String {
+        switch self {
+        case .important: "is important — notify me"
+        case .keep: "stays as it is"
+        case .digest: "goes into the newsletter digest"
+        case .markRead: "is marked as read"
+        case .archive: "is archived"
+        case .trash: "is deleted (to the trash)"
+        case .junk: "goes to Junk"
+        }
+    }
+
+    /// Rules that change mail on their own (applied by /cleanup, /triage and the mail watch).
+    public var isAutomatic: Bool { [.markRead, .archive, .trash, .junk].contains(self) }
+
+    /// Order, invoice and account mail is never handled by these (it stays visible).
+    var sparesTransactionalMail: Bool { ![.important, .keep].contains(self) }
+
+    /// Mail from such senders is filed under "Automated" in /triage.
+    public var isAutomatedMail: Bool { [.digest, .markRead, .archive, .trash, .junk].contains(self) }
 }
 
 /// One learned decision per sender address or whole domain ("@news.example.com").
@@ -78,9 +112,28 @@ public struct SenderRule: Codable, Sendable, Hashable, Identifiable {
 
 public struct SenderRuleBook: Codable, Sendable, Hashable {
     public private(set) var rules: [SenderRule]
+    /// Learned in /triage: which group a sender's mail belongs to (address → category raw value).
+    public private(set) var categories: [String: String]
 
-    public init(rules: [SenderRule] = []) {
+    public init(rules: [SenderRule] = [], categories: [String: String] = [:]) {
         self.rules = rules
+        self.categories = categories
+    }
+
+    enum CodingKeys: String, CodingKey { case rules, categories }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rules = try container.decodeIfPresent([SenderRule].self, forKey: .rules) ?? []
+        categories = try container.decodeIfPresent([String: String].self, forKey: .categories) ?? [:]
+    }
+
+    public func category(for address: String) -> String? {
+        categories[address.lowercased()]
+    }
+
+    public mutating func setCategory(_ category: String?, for address: String) {
+        categories[address.lowercased()] = category
     }
 
     /// Exact address first, then the domain rule.
@@ -96,15 +149,20 @@ public struct SenderRuleBook: Codable, Sendable, Hashable {
     /// mailing-list mail, and order / invoice / shipping / account mail is never junked or digested,
     /// even by an address rule (shops often send those from the same domain as their ads).
     public func action(for message: MailMessage) -> SenderAction? {
+        rule(for: message)?.action
+    }
+
+    /// The rule that applies to a message (address rule first, then the domain's).
+    public func rule(for message: MailMessage) -> SenderRule? {
         let address = message.senderAddress.lowercased()
         if let exact = rules.first(where: { $0.key == address }) {
-            if exact.action != .keep, TransactionalMail.subjectMatches(message.subject) { return nil }
-            return exact.action
+            if exact.action.sparesTransactionalMail, TransactionalMail.subjectMatches(message.subject) { return nil }
+            return exact
         }
         guard let at = address.lastIndex(of: "@"), let rule = rules.first(where: { $0.key == String(address[at...]) }) else { return nil }
-        if rule.action == .keep { return .keep }
+        if !rule.action.sparesTransactionalMail { return rule }
         guard message.bulk?.isBulk == true, !TransactionalMail.looksTransactional(message) else { return nil }
-        return rule.action
+        return rule
     }
 
     /// A rule exists for the sender, but this message is protected from it.
@@ -191,11 +249,12 @@ public enum MailCleanup {
         let protected = messages.filter(rules.protects).count
 
         var junked = 0
-        for index in groups.indices where groups[index].rule == .junk {
-            let moved = try await source.move(ids: groups[index].messages.map(\.id), to: .junk, markRead: true)
-            junked += moved
-            groups[index].outcome = "Moved \(moved) to Junk (your rule)"
-            groups[index].movedTo = .junk
+        for index in groups.indices where groups[index].rule?.isAutomatic == true {
+            let summary = try await RuleApplier.apply(groups[index].messages, rules: rules, source: source)
+            junked += summary.junked
+            guard summary.total > 0 else { continue }
+            groups[index].outcome = summary.text.prefix(1).uppercased() + summary.text.dropFirst() + " (your rule)"
+            groups[index].movedTo = summary.junked > 0 ? .junk : summary.deleted > 0 ? .trash : summary.archived > 0 ? .archive : nil
         }
         let waiting = groups.filter { $0.rule == .digest }.reduce(0) { $0 + $1.messages.filter { !$0.isRead }.count }
 
@@ -209,7 +268,8 @@ public enum MailCleanup {
                 groups[index].reason = suggestion.reason
             }
         }
-        let shown = groups.filter { $0.rule == nil } + groups.filter { $0.rule == .junk }
+        // Senders your rules already handled don't show up again; the summary line says what happened.
+        let shown = groups.filter { $0.rule == nil }
         return CleanupResult(groups: shown, junked: junked, waitingForDigest: waiting, protected: protected)
     }
 
@@ -267,5 +327,53 @@ public enum TransactionalMail {
         if subjectMatches(message.subject) { return true }
         let local = message.senderAddress.lowercased().split(separator: "@").first.map(String.init) ?? ""
         return senderParts.contains { local.contains($0) }
+    }
+}
+
+/// Applies the automatic rules (read / archive / delete / junk) to messages. Only mail that arrived
+/// after the rule was made is touched when `onlyNewerThanRule` is set (the background check), so a new
+/// rule never sweeps through older mail on its own.
+public enum RuleApplier {
+    public struct Summary: Sendable, Hashable {
+        public var markedRead = 0
+        public var archived = 0
+        public var deleted = 0
+        public var junked = 0
+        /// Message ids per action, for Undo and for the triage card.
+        public var handled: [String: SenderAction] = [:]
+
+        public init() {}
+
+        public var total: Int { markedRead + archived + deleted + junked }
+
+        public var text: String {
+            [(junked, "to Junk"), (deleted, "deleted"), (archived, "archived"), (markedRead, "marked read")]
+                .filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: ", ")
+        }
+    }
+
+    public static func apply(
+        _ messages: [MailMessage], rules: SenderRuleBook, source: any MailSource, onlyNewerThanRule: Bool = false
+    ) async throws -> Summary {
+        var byAction: [SenderAction: [MailMessage]] = [:]
+        for message in messages {
+            guard let rule = rules.rule(for: message), rule.action.isAutomatic else { continue }
+            if onlyNewerThanRule, message.date < rule.createdAt { continue }
+            if rule.action == .markRead, message.isRead { continue }
+            byAction[rule.action, default: []].append(message)
+        }
+        var summary = Summary()
+        for (action, items) in byAction {
+            let ids = items.map(\.id)
+            switch action {
+            case .markRead: summary.markedRead += try await source.markRead(ids: ids, true)
+            case .archive: summary.archived += try await source.move(ids: ids, to: .archive, markRead: true)
+            case .trash: summary.deleted += try await source.move(ids: ids, to: .trash, markRead: true)
+            case .junk: summary.junked += try await source.move(ids: ids, to: .junk, markRead: true)
+            default: continue
+            }
+            for id in ids { summary.handled[id] = action }
+        }
+        return summary
     }
 }

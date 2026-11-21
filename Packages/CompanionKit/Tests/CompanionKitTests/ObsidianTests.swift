@@ -3,6 +3,7 @@ import Foundation
 import Testing
 
 @testable import Obsidian
+@testable import Knowledge
 @testable import PersonalData
 @testable import Mail
 @testable import Routing
@@ -225,5 +226,101 @@ struct NotesToolChoiceLiveTests {
         }
         print("NOTES TOOLS: \(passed)/\(cases.count) with \(tools.count) tools offered")
         #expect(passed >= 3)
+    }
+}
+
+@Suite struct DayPlanTests {
+    var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        return calendar
+    }
+    func at(_ hour: Int, _ minute: Int = 0) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: 11, day: 23, hour: hour, minute: minute))!
+    }
+
+    @Test func writesPlanAndBriefWithoutDuplicatesOrTouchingOwnLines() throws {
+        let vault = try FixtureVault(files: ["2026-11-23.md": "My own line\n"], settings: VaultSettings(plannerHeading: "Day planner", plannerHeadingLevel: 1))
+        defer { vault.remove() }
+        let plan = [DayPlanEntry(start: at(10), end: at(10, 30), title: "1:1 Tom"), DayPlanEntry(start: at(9), end: at(9, 15), title: "Standup")]
+        try vault.store.updateDailyNote(plan: plan, brief: "Busy morning.", date: at(7), calendar: calendar)
+        #expect(vault.text("2026-11-23.md") == """
+            My own line
+
+            # Day planner
+
+            - [ ] 09:00 - 09:15 Standup
+            - [ ] 10:00 - 10:30 1:1 Tom
+
+            ## Morning brief
+
+            Busy morning.
+
+            """)
+
+        // The user ticks the standup and adds a line; a second run adds only the new event and replaces the brief.
+        let edited = vault.text("2026-11-23.md")!
+            .replacingOccurrences(of: "- [ ] 09:00 - 09:15 Standup", with: "- [x] 09:00 - 09:15 Standup\n- [ ] 12:00 - 13:00 Lunch")
+        try edited.write(to: vault.root.appending(path: "2026-11-23.md"), atomically: true, encoding: .utf8)
+        try vault.store.updateDailyNote(
+            plan: plan + [DayPlanEntry(start: at(15), end: at(16), title: "Dentist")], brief: "Updated brief.", date: at(8), calendar: calendar)
+        let text = try #require(vault.text("2026-11-23.md"))
+        #expect(text.components(separatedBy: "Standup").count == 2, "ticked entry isn't added again")
+        #expect(text.contains("- [x] 09:00 - 09:15 Standup\n- [ ] 12:00 - 13:00 Lunch\n- [ ] 10:00 - 10:30 1:1 Tom\n- [ ] 15:00 - 16:00 Dentist\n\n## Morning brief"),
+            "new entry in time order before the brief; the user's own lines stay where they are")
+        #expect(text.contains("## Morning brief\n\nUpdated brief.") && !text.contains("Busy morning."))
+        #expect(text.hasPrefix("My own line"))
+    }
+
+    @Test func readsDayPlannerHeadingFromPluginSettings() throws {
+        let vault = try FixtureVault(files: [:])
+        defer { vault.remove() }
+        let plugin = vault.root.appending(path: ".obsidian/plugins/obsidian-day-planner")
+        try FileManager.default.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try #"{"plannerHeading":"Plan","plannerHeadingLevel":2}"#.write(to: plugin.appending(path: "data.json"), atomically: true, encoding: .utf8)
+        let settings = VaultSettings.read(vault.store.vault)
+        #expect(settings.plannerHeading == "Plan" && settings.plannerHeadingLevel == 2)
+    }
+
+    @Test func hybridSearchAndVaultPrefix() async throws {
+        let main = try FixtureVault(files: ["Ideas.md": "Sidebar layout decisions"])
+        let cooking = try FixtureVault(files: ["Leek soup.md": "Leeks, potatoes, cream"])
+        defer { main.remove(); cooking.remove() }
+        let cookingStore = NoteStore(vault: Vault(name: "cooking", path: cooking.root.path))
+        let set = VaultSet(stores: [main.store, cookingStore]) { _, _ in
+            [SemanticNoteHit(vault: "test", path: "Ideas.md", snippet: "Sidebar layout decisions", score: 0.8),
+             SemanticNoteHit(vault: "test", path: "Weak.md", snippet: "", score: 0.1)]
+        }
+        let hits = await set.search("what did I decide about the navigation", in: set.stores)
+        #expect(hits.map(\.path) == ["Ideas.md"], "semantic hit kept, weak one dropped, no duplicate from word search")
+        let split = set.splitVaultPrefix("@Cooking Leek soup — with cream")
+        #expect(split.store?.vault.name == "cooking" && split.rest == "Leek soup — with cream")
+        #expect(set.splitVaultPrefix("@unknown x").store == nil)
+    }
+}
+
+/// Full embedding index of the real main vault into a temp folder; counts and timings only.
+/// `VAULT_LIVE=1 swift test --filter VaultIndexLiveTests`
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["VAULT_LIVE"] == "1"))
+struct VaultIndexLiveTests {
+    @Test func indexesTheMainVault() async throws {
+        let vault = try #require(Vault.detect().first { $0.name == "bits-and-bytes" })
+        let directory = FileManager.default.temporaryDirectory.appending(path: "vault-index-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = KnowledgeStore(directory: directory)
+        let embedder = OllamaProvider(embeddingModel: "embeddinggemma")
+        let indexer = DocumentIndexer(store: store, embedder: embedder, embeddingModel: "embeddinggemma")
+        let source = UUID()
+        var started = ContinuousClock.now
+        let summary = try await indexer.index(source: source, root: vault.root)
+        print("VAULT INDEX LIVE: \(summary.indexed) notes, \(await store.chunkCount) chunks in \(ContinuousClock.now - started); \(summary.failures.count) skipped")
+        started = ContinuousClock.now
+        let again = try await indexer.index(source: source, root: vault.root)
+        print("VAULT INDEX LIVE: second run \(again.unchanged) unchanged in \(ContinuousClock.now - started)")
+        let vector = try await embedder.embed([EmbeddingStyle.forModel("embeddinggemma").query("running local language models on a Mac")]).first!
+        let hits = await store.search(vector, limit: 5)
+        print("VAULT INDEX LIVE: query → top scores \(hits.map { String(format: "%.2f", $0.score) })")
+        #expect(summary.indexed > 300)
+        #expect(again.indexed == 0 && again.unchanged == summary.indexed)
     }
 }

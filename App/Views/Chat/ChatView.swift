@@ -40,6 +40,9 @@ struct ChatView: View {
                 onDelete: isStreaming ? nil : { withAnswer in delete(message, withAnswer: withAnswer) },
                 isCurrentMatch: message == current
             )
+            // Each message keeps its natural height; without this the non-lazy stack hands the
+            // window's spare height to flexible views (the calendar grid's day cells stretched apart).
+            .fixedSize(horizontal: false, vertical: true)
             .id(message.id)
         }
     }

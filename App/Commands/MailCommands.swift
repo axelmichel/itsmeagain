@@ -79,6 +79,46 @@ extension AppModel {
         return .handled
     }
 
+    /// `/triage [days]`: inbox mail (default: last two days, read and unread) sorted into needs-reply / FYI / automated,
+    /// as a card with Read / Archive / Delete / Reply / Rule per mail. The model only sorts.
+    func runTriageCommand(input: CommandInput, text: String, in conversation: Conversation, context: ModelContext) -> CommandOutcome {
+        guard mailEnabled else { return .failed("Mail is turned off in Settings → Assistant.") }
+        guard !chat.isStreaming(conversation) else { return .failed("Wait for the current reply to finish.") }
+        let days = input.positional.first.flatMap(Int.init).map { min(max($0, 1), 14) } ?? 2
+        let reply = start(text, in: conversation, context: context, status: "_Reading unread mail…_")
+        let (source, preferences, rules) = (mailSource, mailPreferences, senderRules)
+        let model = (try? localMailModel()).map { ($0.provider, $0.model) }
+        chat.run(in: conversation, context: context) {
+            do {
+                // Read mail is listed too (to delete or archive it); only unread mail is sorted by the model.
+                let listed = try await source.recentWithHeaders(days: days, unreadOnly: false, limit: 120).filter(preferences.includes)
+                // Your rules first: junk, delete, archive and mark-read senders are handled and not shown.
+                reply.content = "_Applying your rules…_"
+                let ruled = try await RuleApplier.apply(listed, rules: rules, source: source)
+                let messages = listed.filter { ruled.handled[$0.id] == nil }
+                let ruleLine = ruled.total > 0 ? "_Your rules: \(ruled.text)._\n\n" : ""
+                guard !messages.isEmpty else {
+                    reply.content = ruleLine + "_Nothing else in your inbox from the last \(days == 1 ? "day" : "\(days) days")._"
+                    return
+                }
+                reply.content = ruleLine + "_Sorting \(messages.count) mails…_"
+                let items = TriageClassifier.ordered(
+                    await TriageClassifier.classify(messages, preferences: preferences, rules: rules, source: source, model: model)
+                )
+                let counts = TriageItem.Category.allCases.map { category in (category, items.filter { $0.category == category }.count) }
+                let unread = items.filter { !$0.message.isRead }.count
+                reply.content = ruleLine + counts.filter { $0.1 > 0 }.map { "**\($0.1)** \($0.0.title.lowercased())" }.joined(separator: " · ")
+                    + " · \(unread) unread"
+                    + (model == nil ? "\n\n_No local Chat model, so only rules and automated senders were sorted._" : "")
+                reply.attachments = [.mailTriage(items)]
+            } catch {
+                reply.content = ""
+                reply.errorText = error.localizedDescription
+            }
+        }
+        return .handled
+    }
+
     /// `/appointments [days]`: appointments in mail of the last week (read and unread; fewer days if
     /// given), each with your free/conflict status and Add / Ignore.
     func runAppointmentsCommand(input: CommandInput, text: String, in conversation: Conversation, context: ModelContext) -> CommandOutcome {

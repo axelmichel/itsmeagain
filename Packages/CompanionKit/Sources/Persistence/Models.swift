@@ -157,6 +157,8 @@ public enum MessageAttachment: Codable, Sendable, Hashable {
     case appointments([AppointmentProposal])
     /// Tasks from Obsidian notes with checkboxes (ticking writes the note).
     case vaultTasks(title: String, tasks: [VaultTask])
+    /// Unread mail sorted for /triage, with Read / Archive / Delete / Reply / Rule per mail.
+    case mailTriage([TriageItem])
 
     public var textForModel: String {
         switch self {
@@ -166,6 +168,11 @@ public enum MessageAttachment: Codable, Sendable, Hashable {
         case .appointments(let items):
             return "Appointments found in mail:\n" + items.map { item in
                 "- \(item.title), \(ToolDate.day(item.start)) \(item.isAllDay ? "all day" : ToolDate.time(item.start)) (from \(item.sender); \(item.status.rawValue))"
+            }.joined(separator: "\n")
+        case .mailTriage(let items):
+            return "Triaged unread mail:\n" + items.map { item in
+                "- [\(item.category.rawValue)] \(item.message.subject) — \(item.message.senderName)"
+                    + (item.ask.map { ": \($0)" } ?? "") + (item.handled.map { " (\($0.rawValue))" } ?? "") + " (id \(item.message.id))"
             }.joined(separator: "\n")
         case .vaultTasks(let title, let tasks):
             guard !tasks.isEmpty else { return "\(title): none" }

@@ -11,12 +11,55 @@ public enum ObsidianToolName {
     public static let completeTask = "complete_task"
 }
 
+/// A note found by meaning (embedding search over the vault index).
+public struct SemanticNoteHit: Sendable, Hashable {
+    public var vault: String
+    public var path: String
+    public var snippet: String
+    public var score: Float
+
+    public init(vault: String, path: String, snippet: String, score: Float) {
+        self.vault = vault
+        self.path = path
+        self.snippet = snippet
+        self.score = score
+    }
+}
+
 /// The vaults the assistant may use; the first is the main one (daily note, captures).
 public struct VaultSet: Sendable {
-    public let stores: [NoteStore]
+    public typealias SemanticSearch = @Sendable (_ query: String, _ vaults: [String]) async -> [SemanticNoteHit]
 
-    public init(stores: [NoteStore]) {
+    public let stores: [NoteStore]
+    /// Search by meaning, when the vaults are indexed; word search otherwise.
+    public let semantic: SemanticSearch?
+
+    public init(stores: [NoteStore], semantic: SemanticSearch? = nil) {
         self.stores = stores
+        self.semantic = semantic
+    }
+
+    /// Meaning first (when indexed), then word matches; one entry per note, best first.
+    public func search(_ query: String, in stores: [NoteStore], limit: Int = 10) async -> [SemanticNoteHit] {
+        var hits: [SemanticNoteHit] = []
+        if let semantic {
+            hits = await semantic(query, stores.map(\.vault.name)).filter { $0.score >= 0.35 }
+        }
+        for store in stores {
+            for hit in store.search(query, limit: limit) {
+                hits.append(SemanticNoteHit(vault: store.vault.name, path: hit.path, snippet: hit.snippet, score: 0.3 + Float(min(hit.score, 20)) / 100))
+            }
+        }
+        var seen = Set<String>()
+        return Array(hits.sorted { $0.score > $1.score }.filter { seen.insert($0.vault + "/" + $0.path).inserted }.prefix(limit))
+    }
+
+    /// "@cooking rest of text" → (cooking store, "rest of text"); otherwise (nil, text).
+    public func splitVaultPrefix(_ text: String) -> (store: NoteStore?, rest: String) {
+        guard text.hasPrefix("@") else { return (nil, text) }
+        let name = text.dropFirst().prefix { !$0.isWhitespace }
+        guard let store = stores.first(where: { $0.vault.name.localizedCaseInsensitiveCompare(String(name)) == .orderedSame }) else { return (nil, text) }
+        return (store, String(text.dropFirst(name.count + 1)).trimmingCharacters(in: .whitespaces))
     }
 
     public var main: NoteStore? { stores.first }
@@ -53,7 +96,7 @@ public struct SearchNotesTool: Tool {
     public var spec: ToolSpec {
         ToolSpec(
             name: ObsidianToolName.searchNotes,
-            description: "Search the user's Obsidian notes by words. Returns note paths with a matching line.",
+            description: "Search the user's Obsidian notes by meaning and words. Returns note paths with a matching passage.",
             parameters: [
                 "type": "object",
                 "properties": ["query": ["type": "string"], "vault": vaults.vaultParameter],
@@ -67,10 +110,10 @@ public struct SearchNotesTool: Tool {
         let stores = try arguments["vault"]?.stringValue.map { [try vaults.store(named: $0)] } ?? vaults.stores
         var lines: [String] = []
         var sources: [SourceRef] = []
-        for store in stores {
-            for hit in store.search(query, limit: 8) {
-                lines.append("- [\(store.vault.name)] \(hit.path): \(hit.snippet)")
-                if let url = store.vault.url(for: hit.path) { sources.append(SourceRef(title: hit.path, url: url.absoluteString)) }
+        for hit in await vaults.search(query, in: stores) {
+            lines.append("- [\(hit.vault)] \(hit.path): \(hit.snippet)")
+            if let url = stores.first(where: { $0.vault.name == hit.vault })?.vault.url(for: hit.path) {
+                sources.append(SourceRef(title: hit.path, url: url.absoluteString))
             }
         }
         guard !lines.isEmpty else { return ToolOutput(content: "No notes match “\(query)”.") }

@@ -15,6 +15,13 @@ struct AppointmentListView: View {
     @State private var statuses: [String: AppointmentCheck.Status] = [:]
     @State private var busy: Set<String> = []
     @State private var errors: [String: String] = [:]
+    @State private var calendars: [CalendarInfo] = []
+    /// The calendar new events go into; shared with the calendar card's form.
+    @AppStorage("eventCalendarID") private var calendarID = ""
+
+    private var chosen: CalendarInfo? {
+        calendars.first { $0.id == calendarID } ?? calendars.first
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -24,6 +31,7 @@ struct AppointmentListView: View {
         }
         .frame(maxWidth: 640, alignment: .leading)
         .task(id: items.map(\.status)) { await refresh() }
+        .task { calendars = await EventKitStore.shared.writableCalendars() }
     }
 
     private func row(_ item: AppointmentProposal) -> some View {
@@ -73,7 +81,8 @@ struct AppointmentListView: View {
     private func statusLine(_ item: AppointmentProposal) -> some View {
         switch item.status {
         case .added:
-            Label("Added to your calendar", systemImage: "checkmark.circle").font(.caption).foregroundStyle(Theme.accent)
+            Label("Added to \(item.calendarTitle ?? "your calendar")", systemImage: "checkmark.circle")
+                .font(.caption).foregroundStyle(Theme.accent)
         case .ignored:
             Text("Ignored").font(.caption).foregroundStyle(.secondary)
         case .pending:
@@ -95,9 +104,29 @@ struct AppointmentListView: View {
             switch item.status {
             case .pending:
                 HStack(spacing: 10) {
-                    Button("Add to Calendar") { add(item) }
-                        .fontWeight(.semibold)
-                        .disabled(statuses[item.id] == .alreadyInCalendar)
+                    // One click: the last used calendar. The menu: any other calendar.
+                    Menu {
+                        ForEach(calendars) { info in
+                            Button {
+                                calendarID = info.id
+                                add(item, to: info.id)
+                            } label: {
+                                Label {
+                                    Text(info.source.isEmpty ? info.title : "\(info.title) — \(info.source)")
+                                } icon: {
+                                    Image(systemName: "circle.fill").foregroundStyle(info.colorHex.flatMap(Color.init(hex:)) ?? Theme.accent)
+                                }
+                            }
+                        }
+                    } label: {
+                        Text("Add to \(chosen?.title ?? "Calendar")").fontWeight(.semibold)
+                    } primaryAction: {
+                        add(item, to: chosen?.id)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .disabled(statuses[item.id] == .alreadyInCalendar)
+                    .help("Click to add to \(chosen?.title ?? "your default calendar"); open the menu for another calendar")
                     Button("Ignore") { update(item) { $0.status = .ignored } }
                 }
             case .added, .ignored:
@@ -108,16 +137,17 @@ struct AppointmentListView: View {
 
     // MARK: Actions
 
-    private func add(_ item: AppointmentProposal) {
+    private func add(_ item: AppointmentProposal, to calendarID: String?) {
         busy.insert(item.id)
         Task {
             do {
                 let event = try await EventKitStore.shared.createEvent(
-                    title: item.title, start: item.start, end: item.end, isAllDay: item.isAllDay, calendarID: nil, location: item.location
+                    title: item.title, start: item.start, end: item.end, isAllDay: item.isAllDay, calendarID: calendarID, location: item.location
                 )
                 update(item) {
                     $0.status = .added
                     $0.eventID = event.id
+                    $0.calendarTitle = event.calendar
                 }
                 errors[item.id] = nil
             } catch {

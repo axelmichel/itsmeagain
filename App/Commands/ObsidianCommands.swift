@@ -10,16 +10,20 @@ extension AppModel {
     static let obsidianHandlers: Set<String> = ["note", "capture", "todos", "done", "find"]
 
     func runObsidianCommand(_ handler: String, input: CommandInput, text: String, in conversation: Conversation, context: ModelContext) -> CommandOutcome {
-        let argument = input.arguments.trimmingCharacters(in: .whitespacesAndNewlines)
         let vaults = vaults
-        guard let main = vaults.main else {
+        // "@cooking …" picks an enabled vault; otherwise the main vault.
+        let (chosen, argument) = vaults.splitVaultPrefix(input.arguments.trimmingCharacters(in: .whitespacesAndNewlines))
+        if input.arguments.hasPrefix("@"), chosen == nil {
+            return .failed("No enabled vault “\(input.arguments.dropFirst().prefix { !$0.isWhitespace })”. Enabled: \(vaults.stores.map(\.vault.name).joined(separator: ", ")).")
+        }
+        guard let main = chosen ?? vaults.main else {
             return .failed("No Obsidian vault is enabled. Choose one in Settings → Assistant → Obsidian.")
         }
         switch handler {
-        case "note" where argument.isEmpty: return .failed("Usage: /note <text> — adds a line to today's daily note")
-        case "capture" where argument.isEmpty: return .failed("Usage: /capture <title> — <text>")
+        case "note" where argument.isEmpty: return .failed("Usage: /note [@vault] <text> — adds a line to today's daily note")
+        case "capture" where argument.isEmpty: return .failed("Usage: /capture [@vault] <title> — <text>")
         case "done" where argument.isEmpty: return .failed("Usage: /done <words of the task>")
-        case "find" where argument.isEmpty: return .failed("Usage: /find <words>")
+        case "find" where argument.isEmpty: return .failed("Usage: /find [@vault] <words>")
         default: break
         }
         guard !chat.isStreaming(conversation) else { return .failed("Wait for the current reply to finish.") }
@@ -45,12 +49,12 @@ extension AppModel {
                     reply.content = "Saved [\(path)](\(main.vault.url(for: path)?.absoluteString ?? "")) in \(main.vault.name)."
 
                 case "todos":
-                    var stores = vaults.stores
+                    var stores = chosen.map { [$0] } ?? vaults.stores
                     var tasks: [VaultTask]
-                    var title = "Open tasks"
+                    var title = chosen.map { "Open tasks in \($0.vault.name)" } ?? "Open tasks"
                     if let named = vaults.stores.first(where: { $0.vault.name.localizedCaseInsensitiveCompare(argument) == .orderedSame }) {
                         stores = [named]
-                        title += " in \(named.vault.name)"
+                        title = "Open tasks in \(named.vault.name)"
                     }
                     tasks = stores.flatMap { $0.tasks() }
                     if argument.lowercased() == "due" {
@@ -66,20 +70,19 @@ extension AppModel {
 
                 case "done":
                     let words = argument.lowercased().split(separator: " ")
-                    let matches = vaults.stores.flatMap { $0.tasks() }.filter { task in
+                    let matches = (chosen.map { [$0] } ?? vaults.stores).flatMap { $0.tasks() }.filter { task in
                         words.allSatisfy { task.text.lowercased().contains($0) }
                     }
                     reply.content = matches.isEmpty ? "No open task matches “\(argument)”." : "Tick the one you mean:"
                     if !matches.isEmpty { reply.attachments = [.vaultTasks(title: "Matching tasks", tasks: Array(matches.prefix(20)))] }
 
-                default:  // find
+                default:  // find: by meaning (when indexed) and words
+                    let stores = chosen.map { [$0] } ?? vaults.stores
                     var lines: [String] = []
-                    for store in vaults.stores {
-                        for hit in store.search(argument, limit: 10) {
-                            let link = store.vault.url(for: hit.path)?.absoluteString ?? ""
-                            let vaultLabel = vaults.stores.count > 1 ? " · _\(store.vault.name)_" : ""
-                            lines.append("- [\(hit.path)](\(link))\(vaultLabel)\n  \(hit.snippet)")
-                        }
+                    for hit in await vaults.search(argument, in: stores, limit: 12) {
+                        let link = stores.first { $0.vault.name == hit.vault }?.vault.url(for: hit.path)?.absoluteString ?? ""
+                        let vaultLabel = stores.count > 1 ? " · _\(hit.vault)_" : ""
+                        lines.append("- [\(hit.path)](\(link))\(vaultLabel)\n  \(hit.snippet)")
                     }
                     reply.content = lines.isEmpty ? "No notes match “\(argument)”." : lines.joined(separator: "\n")
                 }

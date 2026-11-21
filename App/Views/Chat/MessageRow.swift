@@ -126,6 +126,8 @@ struct MessageRow: View {
                         AppointmentListView(message: message, index: index, items: items)
                     case .vaultTasks(let title, let tasks):
                         VaultTaskListView(message: message, index: index, title: title, tasks: tasks)
+                    case .mailTriage(let items):
+                        TriageView(message: message, index: index, items: items)
                     }
                 }
                 if let error = message.errorText {

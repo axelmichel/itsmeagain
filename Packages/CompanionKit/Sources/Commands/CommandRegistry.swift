@@ -89,22 +89,29 @@ public struct CommandRegistry: Sendable {
                     Give me my brief for {{today}} ({{date}}): today's events with times, anything I should prepare for, \
                     reminders that are due today or overdue, my free time today, and unread mail that needs attention \
                     (skip automated mail; [VIP] first; at most five). Mention tomorrow's first event if it starts early. \
+                    End with the three most relevant news items for my interests (news, one line each with the link). \
                     Keep it short and skimmable. $ARGUMENTS
                     """,
                 task: .chat,
-                tools: ["calendar_events", "free_slots", "reminders", "mail_unread"]
+                tools: ["calendar_events", "free_slots", "reminders", "mail_unread", "news"]
             )),
             scope: .personal
         ),
     ]
 
+    /// News from the user's feeds (public data, but it runs in Chat with the other personal commands).
+    public static let news: [CommandSpec] = [
+        CommandSpec(name: "news", summary: "Today's news for your interests", argumentHint: "[topic]", kind: .native(handler: "news"), scope: .personal),
+    ]
+
     /// Obsidian vaults (Chat mode). Notes are only written where the user asked.
     public static let obsidian: [CommandSpec] = [
-        CommandSpec(name: "note", summary: "Add a line to today's daily note", argumentHint: "<text>", kind: .native(handler: "note"), scope: .personal),
-        CommandSpec(name: "capture", summary: "Save a new note in Inbox/", argumentHint: "<title> — <text>", kind: .native(handler: "capture"), scope: .personal),
+        CommandSpec(name: "note", summary: "Add a line to today's daily note", argumentHint: "[@vault] <text>", kind: .native(handler: "note"), scope: .personal),
+        CommandSpec(name: "capture", summary: "Save a new note in Inbox/", argumentHint: "[@vault] <title> — <text>", kind: .native(handler: "capture"), scope: .personal),
         CommandSpec(name: "todos", summary: "Open tasks from your notes", argumentHint: "[due | #tag | vault]", kind: .native(handler: "todos"), scope: .personal),
         CommandSpec(name: "done", summary: "Tick off a task from your notes", argumentHint: "<words>", kind: .native(handler: "done"), scope: .personal),
-        CommandSpec(name: "find", summary: "Search your notes", argumentHint: "<words>", kind: .native(handler: "find"), scope: .personal),
+        CommandSpec(name: "find", summary: "Search your notes by meaning and words", argumentHint: "[@vault] <words>", kind: .native(handler: "find"), scope: .personal),
+        CommandSpec(name: "dayplan", summary: "Today's events into the daily note (Day Planner)", kind: .native(handler: "dayplan"), scope: .personal),
     ]
 
     /// Personal memory (Chat mode, local models only).
@@ -135,19 +142,8 @@ public struct CommandRegistry: Sendable {
             kind: .native(handler: "digest"), scope: .personal
         ),
         CommandSpec(
-            name: "triage", summary: "Sort unread mail: needs reply, FYI, automated",
-            kind: .prompt(PromptCommand(
-                template: """
-                    Triage my unread mail of the last two days (use mail_unread). Group it into: **Needs a reply**, \
-                    **FYI**, and **Automated / newsletters** (one line in total for these, with a count). [VIP] senders \
-                    come first. For "Needs a reply", read the message (mail_read) when the subject isn't clear enough, and \
-                    state in one short line what they actually ask for, with any deadline (e.g. "wants the Q1 numbers by \
-                    Monday") — not just "action needed". Don't draft replies unless I ask. $ARGUMENTS
-                    """,
-                task: .chat,
-                tools: ["mail_unread", "mail_read"]
-            )),
-            scope: .personal
+            name: "triage", summary: "Unread mail sorted, with Read / Archive / Delete / Reply / Rule", argumentHint: "[days]",
+            kind: .native(handler: "triage"), scope: .personal
         ),
         CommandSpec(
             name: "from", summary: "Recent mail from someone, summarised", argumentHint: "<person>",

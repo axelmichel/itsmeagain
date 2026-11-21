@@ -1,3 +1,4 @@
+import CompanionCore
 import Foundation
 import Synchronization
 import Testing
@@ -281,9 +282,8 @@ struct DigestModelLiveTests {
         #expect(moves.count == 1)
         #expect(Set(moves[0].ids) == ["<s1@x>", "<s2@x>"] && moves[0].destination == .junk && moves[0].markRead)
         #expect(result.junked == 2 && result.waitingForDigest == 1)
-        #expect(result.groups.map(\.address) == ["deals@shop.example", "promo@spam.example"], "undecided first; keep/digest hidden")
+        #expect(result.groups.map(\.address) == ["deals@shop.example"], "only undecided senders; ruled ones are handled, not shown")
         #expect(result.groups[0].suggestion == .junk && result.groups[0].reason == "Promotions")
-        #expect(result.groups[1].movedTo == .junk)
         #expect(MailCleanup.summary(result) == "Moved **2** to Junk by your rules. **1 sender** to decide. Your choice becomes a rule that runs automatically from now on. 1 newsletter waits for /digest.")
     }
 }
@@ -361,5 +361,136 @@ struct DigestModelLiveTests {
         #expect(moved == [messages[0].id])
         #expect(result.protected == 2)
         #expect(MailCleanup.summary(result).contains("Left 2 order or account mails"))
+    }
+}
+
+/// Answers the grouping call and the per-mail "ask" call differently.
+struct TriageScriptProvider: LLMProvider {
+    var id = ProviderID("triage")
+    var displayName = "Triage"
+    var capabilities: ProviderCapabilities { [.streaming] }
+    let grouping: String
+    let ask: String
+
+    func listModels() async throws -> [ModelInfo] { [] }
+
+    func stream(_ request: ChatRequest) -> AsyncThrowingStream<ChatEvent, Error> {
+        let reply = (request.system ?? "").contains("Sort the user's unread mail") ? grouping : ask
+        return AsyncThrowingStream { continuation in
+            continuation.yield(.textDelta(reply))
+            continuation.yield(.done(nil))
+            continuation.finish()
+        }
+    }
+}
+
+@Suite struct TriageTests {
+    @Test func rulesAndVIPsBeatTheModelAndAsksAreRead() async throws {
+        let messages = [
+            MailMessage(id: "<boss@x>", account: "A", sender: "Tom <tom@company.de>", subject: "Budget", date: .now, isRead: false),
+            MailMessage(id: "<shop@x>", account: "A", sender: "Shop <deals@shop.example>", subject: "Sale", date: .now, isRead: false, bulk: BulkInfo(isBulk: true)),
+            MailMessage(id: "<anna@x>", account: "A", sender: "Anna <anna@x.org>", subject: "Photos", date: .now, isRead: false),
+            MailMessage(id: "<bank@x>", account: "A", sender: "Bank <service@bank.example>", subject: "Statement", date: .now, isRead: false),
+        ]
+        let source = FakeMailSource(messages: messages)
+        source.rawSources = ["<boss@x>": "Content-Type: text/plain\n\nCan you send the Q1 numbers by Monday?"]
+        var rules = SenderRuleBook()
+        rules.set("service@bank.example", .digest)
+        // The model calls Tom "automated" (VIPs never are) and numbers 1-2 = Tom, Anna (shop and bank are presorted).
+        let grouping = #"{"mails":[{"n":1,"category":"automated"},{"n":2,"category":"needsReply"},{"n":7,"category":"fyi"}]}"#
+        let provider = TriageScriptProvider(grouping: grouping, ask: #"{"ask":"wants the Q1 numbers by Monday"}"#)
+        let items = await TriageClassifier.classify(
+            messages, preferences: MailPreferences(vipSenders: ["tom@company.de"]), rules: rules, source: source, model: (provider, "m"))
+        let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        #expect(byID["<boss@x>"]?.category == .fyi, "VIP is never automated")
+        #expect(byID["<anna@x>"]?.category == .needsReply)
+        #expect(byID["<shop@x>"]?.category == .automated && byID["<bank@x>"]?.category == .automated)
+        #expect(byID["<anna@x>"]?.ask == nil, "no body for Anna in the fake → no ask")
+        #expect(TriageClassifier.ordered(items).map(\.id).first == "<anna@x>")
+    }
+
+    @Test func withoutAModelOnlyPresorts() async {
+        let items = await TriageClassifier.classify(sampleMail, preferences: MailPreferences(), rules: SenderRuleBook(), source: FakeMailSource(messages: []), model: nil)
+        #expect(items.filter { $0.category == .automated }.map(\.id) == ["<a2@x>", "<a4@x>"])
+    }
+}
+
+@Suite struct ReplyDrafterTests {
+    @Test func aDraftWithoutTheIntentFallsBackToTheUsersWords() async throws {
+        let empty = ScriptedProvider(reply: #"{"body":"Hallo Tom,\n\n\nViele Grüße,\nAxel"}"#)
+        let body = try await ReplyDrafter.draft(intent: "ja passt, bringe die Zahlen mit", original: "…", message: sampleMail[0], userName: nil, provider: empty, model: "m")
+        #expect(body == "ja passt, bringe die Zahlen mit")
+        let good = ScriptedProvider(reply: #"{"body":"Hallo Tom,\n\nja, das passt. Ich bringe die Zahlen mit.\n\nViele Grüße"}"#)
+        #expect(try await ReplyDrafter.draft(intent: "ja passt, bringe die Zahlen mit", original: "…", message: sampleMail[0], userName: nil, provider: good, model: "m").contains("Zahlen"))
+    }
+}
+
+@Suite struct RuleTests {
+    static let list = BulkInfo(isBulk: true)
+    func mail(_ id: String, _ sender: String, _ subject: String, read: Bool = false, bulk: BulkInfo? = nil, date: Date = .now) -> MailMessage {
+        MailMessage(id: id, account: "A", sender: sender, subject: subject, date: date, isRead: read, bulk: bulk)
+    }
+
+    @Test func appliesEachAutomaticRuleAndSparesOrderMail() async throws {
+        let messages = [
+            mail("1", "GitHub <notifications@github.com>", "PR merged", bulk: Self.list),
+            mail("2", "Shop <news@shop.example>", "Sale", bulk: Self.list),
+            mail("3", "Shop <news@shop.example>", "Your order #12 has shipped", bulk: Self.list),
+            mail("4", "Status <status@cloud.example>", "All systems normal"),
+            mail("5", "Status <status@cloud.example>", "Already read", read: true),
+            mail("6", "Spam <x@spam.example>", "Win"),
+        ]
+        let source = FakeMailSource(messages: messages)
+        var rules = SenderRuleBook()
+        rules.set("notifications@github.com", .archive)
+        rules.set("news@shop.example", .trash)
+        rules.set("status@cloud.example", .markRead)
+        rules.set("@spam.example", .junk)
+        let summary = try await RuleApplier.apply(messages, rules: rules, source: source)
+        #expect(summary.archived == 1 && summary.deleted == 1 && summary.markedRead == 1)
+        #expect(summary.junked == 0, "domain rules need mailing-list mail")
+        #expect(summary.handled["3"] == nil, "order mail is never deleted by a rule")
+        #expect(summary.handled["5"] == nil, "already read stays as it is")
+        #expect(summary.text == "1 deleted, 1 archived, 1 marked read")
+    }
+
+    @Test func backgroundRunOnlyTouchesMailNewerThanTheRule() async throws {
+        var rules = SenderRuleBook()
+        rules.set("a@x.example", .archive)
+        let created = rules.rules[0].createdAt
+        let messages = [
+            mail("old", "A <a@x.example>", "Before", date: created.addingTimeInterval(-3_600)),
+            mail("new", "A <a@x.example>", "After", date: created.addingTimeInterval(60)),
+        ]
+        let summary = try await RuleApplier.apply(messages, rules: rules, source: FakeMailSource(messages: messages), onlyNewerThanRule: true)
+        #expect(Array(summary.handled.keys) == ["new"])
+    }
+
+    @Test func importantAndLearnedGroupsDriveTriage() {
+        var rules = SenderRuleBook()
+        rules.set("anna@x.org", .important)
+        rules.set("@company.example", .important)
+        rules.setCategory(TriageItem.Category.needsReply.rawValue, for: "Billing@Vendor.example")
+        let items = TriageClassifier.presort([
+            mail("1", "Anna <anna@x.org>", "Hi", bulk: Self.list),
+            mail("2", "Boss <boss@company.example>", "Plan"),
+            mail("3", "Vendor <billing@vendor.example>", "Invoice", bulk: Self.list),
+        ], preferences: MailPreferences(), rules: rules)
+        #expect(items[0].isVIP && items[0].category == .fyi, "important senders are never automated")
+        #expect(items[1].isVIP, "domain-wide important applies to every mail of the domain")
+        #expect(items[2].category == .needsReply && items[2].learned)
+    }
+
+    @Test func oldTriageCardsStillDecode() throws {
+        let item = TriageItem(message: sampleMail[0], category: .fyi)
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(item)) as! [String: Any]
+        json.removeValue(forKey: "learned")
+        let decoded = try JSONDecoder().decode(TriageItem.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(decoded.learned == false && decoded.id == item.id)
+    }
+
+    @Test func oldRuleBooksStillDecode() throws {
+        let book = try JSONDecoder().decode(SenderRuleBook.self, from: Data(#"{"rules":[]}"#.utf8))
+        #expect(book.categories.isEmpty)
     }
 }

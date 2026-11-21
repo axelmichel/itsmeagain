@@ -456,6 +456,8 @@ private struct AddEventForm: View {
     @State private var location = ""
     @State private var calendars: [CalendarInfo] = []
     @State private var calendarID: String?
+    /// Last used calendar, shared with "Add to …" on appointments found in mail.
+    @AppStorage("eventCalendarID") private var lastCalendarID = ""
     @State private var saving = false
     @State private var error: String?
     @FocusState private var titleFocused: Bool
@@ -488,7 +490,7 @@ private struct AddEventForm: View {
                 }
             }
             TextField("Location", text: $location, prompt: Text("Optional"))
-            if calendars.count > 1 {
+            if !calendars.isEmpty {
                 Picker("Calendar", selection: $calendarID) {
                     ForEach(calendars) { info in
                         Label {
@@ -515,7 +517,7 @@ private struct AddEventForm: View {
         .frame(width: 340)
         .task {
             calendars = await EventKitStore.shared.writableCalendars()
-            calendarID = calendarID ?? calendars.first?.id
+            calendarID = calendarID ?? calendars.first { $0.id == lastCalendarID }?.id ?? calendars.first?.id
             titleFocused = true
         }
     }
@@ -536,6 +538,7 @@ private struct AddEventForm: View {
                     title: title.trimmingCharacters(in: .whitespaces), start: begin, end: end, isAllDay: allDay,
                     calendarID: calendarID, location: trimmedLocation.isEmpty ? nil : trimmedLocation
                 )
+                if let calendarID { lastCalendarID = calendarID }
                 onAdded(event)
             } catch {
                 self.error = error.localizedDescription

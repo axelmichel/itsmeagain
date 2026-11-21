@@ -52,12 +52,20 @@ public struct VaultSettings: Sendable, Hashable {
     public var dailyTemplate: String?
     /// Tasks plugin: append "✅ YYYY-MM-DD" when ticking.
     public var setDoneDate: Bool
+    /// Day Planner plugin: the heading its timeline reads from the daily note.
+    public var plannerHeading: String
+    public var plannerHeadingLevel: Int
 
-    public init(dailyFolder: String = "", dailyFormat: String = "YYYY-MM-DD", dailyTemplate: String? = nil, setDoneDate: Bool = true) {
+    public init(
+        dailyFolder: String = "", dailyFormat: String = "YYYY-MM-DD", dailyTemplate: String? = nil, setDoneDate: Bool = true,
+        plannerHeading: String = "Day planner", plannerHeadingLevel: Int = 1
+    ) {
         self.dailyFolder = dailyFolder
         self.dailyFormat = dailyFormat
         self.dailyTemplate = dailyTemplate
         self.setDoneDate = setDoneDate
+        self.plannerHeading = plannerHeading
+        self.plannerHeadingLevel = plannerHeadingLevel
     }
 
     public static func read(_ vault: Vault) -> VaultSettings {
@@ -74,6 +82,12 @@ public struct VaultSettings: Sendable, Hashable {
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         {
             settings.setDoneDate = json["setDoneDate"] as? Bool ?? true
+        }
+        if let data = try? Data(contentsOf: config.appending(path: "plugins/obsidian-day-planner/data.json")),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
+            if let heading = json["plannerHeading"] as? String, !heading.isEmpty { settings.plannerHeading = heading }
+            if let level = json["plannerHeadingLevel"] as? Int, (1...6).contains(level) { settings.plannerHeadingLevel = level }
         }
         return settings
     }
@@ -308,6 +322,8 @@ public struct NoteStore: Sendable {
         try write(path, content: content, expecting: existing)
         return path
     }
+
+    func dailyTemplateText() -> String? { template() }
 
     private func template() -> String? {
         guard let template = settings.dailyTemplate, let note = try? read(template) else { return nil }

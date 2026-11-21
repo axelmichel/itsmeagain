@@ -16,6 +16,7 @@ struct MailCleanupView: View {
     @State private var status: [String: String] = [:]
     @State private var errors: [String: String] = [:]
     @State private var pendingUnsubscribe: SenderGroup?
+    @State private var showDone = false
 
     private var suggested: [SenderGroup] {
         groups.filter { $0.rule == nil && $0.outcome == nil && $0.suggestion != nil }
@@ -34,8 +35,14 @@ struct MailCleanupView: View {
                         .help("Save every suggestion as a rule; suggested Junk moves to Junk now")
                 }
             }
+            // Decided senders leave the list (kept collapsed below, only for Undo).
+            let open = groups.filter { $0.outcome == nil || status[$0.address] != nil }
+            let done = groups.filter { $0.outcome != nil && status[$0.address] == nil }
+            if open.isEmpty {
+                Text("All senders decided.").font(.callout).foregroundStyle(.secondary)
+            }
             VStack(alignment: .leading, spacing: 1) {
-                ForEach(groups) { group in
+                ForEach(open) { group in
                     SenderRow(
                         group: group,
                         status: status[group.address],
@@ -46,6 +53,26 @@ struct MailCleanupView: View {
                         onUndo: { undo(group) }
                     )
                 }
+            }
+            if !done.isEmpty {
+                DisclosureGroup("Done (\(done.count))", isExpanded: $showDone) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        ForEach(done) { group in
+                            SenderRow(
+                                group: group,
+                                status: status[group.address],
+                                error: errors[group.address],
+                                onDecide: { decide(group, $0, wholeDomain: $1) },
+                                onArchive: { archive(group) },
+                                onUnsubscribe: { pendingUnsubscribe = group },
+                                onUndo: { undo(group) }
+                            )
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
             }
         }
         .confirmationDialog(
@@ -68,37 +95,32 @@ struct MailCleanupView: View {
         let key = wholeDomain ? group.domain : group.address
         app.senderRules.set(key, action, name: group.name)
         let scope = wholeDomain ? "mailing-list mail from \(group.domain)" : "this sender"
-        switch action {
-        case .junk:
+        if action.isAutomatic {
             // Only what the rule covers: order, invoice and account mail stays in the inbox.
-            let covered = group.messages.filter { app.senderRules.action(for: $0) == .junk }
+            let rules = app.senderRules
+            let covered = group.messages.filter { rules.action(for: $0) == action }
             let spared = group.messages.count - covered.count
             let note = spared > 0 ? " · kept \(spared) order/account mail" : ""
             guard !covered.isEmpty else {
                 store(update(group) {
-                    $0.rule = .junk
-                    $0.outcome = "Rule saved · nothing to move\(note)"
+                    $0.rule = action
+                    $0.outcome = "Rule saved · nothing to do\(note)"
                 })
                 return
             }
-            perform(group, "Moving \(covered.count) to Junk…") { source in
-                let moved = try await source.move(ids: covered.map(\.id), to: .junk, markRead: true)
-                if moved == 0 { throw MailError.script("Mail no longer has these messages in the inbox.") }
+            perform(group, "\(action.title)…") { source in
+                let summary = try await RuleApplier.apply(covered, rules: rules, source: source)
+                if summary.total == 0 { throw MailError.script("Mail no longer has these messages in the inbox.") }
                 return update(group) {
-                    $0.rule = .junk
-                    $0.outcome = "Moved \(moved) to Junk\(note) · \(scope) goes to Junk from now on"
-                    $0.movedTo = .junk
+                    $0.rule = action
+                    $0.outcome = summary.text.prefix(1).uppercased() + summary.text.dropFirst() + "\(note) · from now on, mail from \(scope) \(action.explanation)"
+                    $0.movedTo = action == .junk ? .junk : action == .trash ? .trash : action == .archive ? .archive : nil
                 }
             }
-        case .digest:
+        } else {
             store(update(group) {
-                $0.rule = .digest
-                $0.outcome = "Digest · /digest summarises \(scope), then archives it"
-            })
-        case .keep:
-            store(update(group) {
-                $0.rule = .keep
-                $0.outcome = "Kept · won't ask about \(scope) again"
+                $0.rule = action
+                $0.outcome = "\(action.title) · from now on, mail from \(scope) \(action.explanation)"
             })
         }
     }
@@ -293,11 +315,7 @@ private struct SenderRow: View {
     }
 
     private func help(_ action: SenderAction) -> String {
-        switch action {
-        case .junk: "Move to Junk now and from now on (order and account mail is never junked)"
-        case .digest: "Summarise in /digest, then archive"
-        case .keep: "Leave in the inbox and don't ask again"
-        }
+        "From now on, mail from this sender \(action.explanation)"
     }
 }
 

@@ -4,6 +4,7 @@ import Foundation
 import Knowledge
 import Mail
 import Memory
+import News
 import Obsidian
 import PersonalData
 import Observation
@@ -86,6 +87,7 @@ final class AppModel {
     let commands = CommandCenter()
     @ObservationIgnored let notifier = Notifier()
     let memory = MemoryModel()
+    let news = NewsModel()
     @ObservationIgnored private(set) var scheduler: AutomationScheduler?
 
     enum SidebarMode: String { case chats, automations, memory }
@@ -125,10 +127,13 @@ final class AppModel {
     }
 
     var mailPreferences: MailPreferences {
-        // Senders the user sorted into Digest or Junk count as automated mail too.
-        let ruled = senderRules.rules.filter { $0.action != .keep }.map(\.key)
+        // Rules feed the preferences: "Important" senders are on the watch list, senders whose mail is
+        // handled automatically (digest, read, archive, delete, junk) count as automated mail.
+        let important = senderRules.rules.filter { $0.action == .important }.map(\.key)
+        let automated = senderRules.rules.filter { $0.action.isAutomatedMail }.map(\.key)
         return MailPreferences(
-            excludedAccounts: excludedMailAccounts, vipSenders: Self.split(vipSenders), newsletterSenders: Self.split(newsletterSenders) + ruled
+            excludedAccounts: excludedMailAccounts, vipSenders: Self.split(vipSenders) + important,
+            newsletterSenders: Self.split(newsletterSenders) + automated
         )
     }
 
@@ -202,6 +207,13 @@ final class AppModel {
         didSet { UserDefaults.standard.set(dailyNoteWithoutAsking, forKey: "dailyNoteWithoutAsking") }
     }
 
+    /// After /brief: today's events into the Day Planner section, the brief into "Morning brief".
+    var briefToDailyNote: Bool = UserDefaults.standard.object(forKey: "briefToDailyNote") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(briefToDailyNote, forKey: "briefToDailyNote") }
+    }
+
+    let vaultIndex = VaultIndex()
+
     func isVaultEnabled(_ vault: Vault) -> Bool {
         enabledVaultPaths.map { $0.contains(vault.path) } ?? vault.isOpen
     }
@@ -217,7 +229,11 @@ final class AppModel {
         let enabled = detectedVaults.filter(isVaultEnabled)
         let main = enabled.first { $0.path == mainVaultPath } ?? enabled.first
         let ordered = (main.map { [$0] } ?? []) + enabled.filter { $0.path != main?.path }
-        return VaultSet(stores: ordered.map { NoteStore(vault: $0) })
+        let index = vaultIndex
+        let (embedder, model) = (knowledge.embedder, knowledge.embeddingModel)
+        return VaultSet(stores: ordered.map { NoteStore(vault: $0) }) { query, names in
+            await index.search(query, vaults: ordered.filter { names.contains($0.name) }, embedder: embedder, model: model)
+        }
     }
 
     /// Calendar, reminder and mail tools — only ever added to local-only tasks.
@@ -228,6 +244,8 @@ final class AppModel {
         if mailEnabled { tools += MailToolbox.tools(source: mailSource, preferences: mailPreferences) }
         tools += [RecallTool(memory: memory), RememberTool(memory: memory)]
         tools += ObsidianToolbox.tools(vaults)
+        let news = news
+        tools.append(NewsTool(ranking: news.ranking) { await MainActor.run { news.library.items } })
         return tools
     }
 
@@ -390,6 +408,15 @@ final class AppModel {
             )
         }
         Task { await memory.load() }
+        news.interests = { [unowned self] in
+            // Projects and interests from memory become extra news topics.
+            let extra = memory.book.active.filter { $0.kind == .project }.compactMap(\.subject)
+            return (newsletterTopicList, extra)
+        }
+        news.start()
+        vaultIndex.vaults = { [unowned self] in detectedVaults.filter(isVaultEnabled) }
+        vaultIndex.embedder = { [unowned self] in (knowledge.embedder, knowledge.embeddingModel) }
+        vaultIndex.start()
         let mailWatcher = MailWatcher(app: self, container: container)
         self.mailWatcher = mailWatcher
         mailWatcher.start()

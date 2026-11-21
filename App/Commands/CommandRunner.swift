@@ -1,6 +1,8 @@
 import Commands
 import Foundation
+import Obsidian
 import Persistence
+import PersonalData
 import Routing
 import SwiftData
 
@@ -50,10 +52,39 @@ extension AppModel {
             send(text, in: target, context: context, command: CommandInvocation(
                 modelText: expanded, task: prompt.task, tools: prompt.tools,
                 autoApproved: prompt.autoApproved.union(prompt.task == .chat ? standingApprovals : []),
-                finalize: spec.name == "brief" ? attachDueReminders : nil
+                finalize: spec.name == "brief" ? finishBrief : nil
             ))
             return .handled
         }
+    }
+
+    /// After the brief: due reminders underneath, and (if set) the day plan and brief into the daily note.
+    private var finishBrief: @MainActor (StoredMessage) async -> Void {
+        { [weak self] reply in
+            guard let self else { return }
+            await attachDueReminders(reply)
+            guard briefToDailyNote, vaults.main != nil else { return }
+            do {
+                let path = try await writeDayPlan(brief: reply.content)
+                reply.content += "\n\n_Written to today's daily note: \(path)_"
+            } catch {
+                reply.content += "\n\n_Couldn't write the daily note: \(error.localizedDescription)_"
+            }
+        }
+    }
+
+    /// Today's timed events (not declined, not all-day) as Day Planner entries, plus the brief.
+    func writeDayPlan(brief: String?) async throws -> String {
+        guard let main = vaults.main else { throw VaultError.invalid("No Obsidian vault is enabled.") }
+        var plan: [DayPlanEntry] = []
+        if EventKitStore.eventsAuthorized {
+            let start = Calendar.current.startOfDay(for: .now)
+            let end = Calendar.current.date(byAdding: .day, value: 1, to: start)!
+            plan = try await EventKitStore.shared.events(from: start, to: end)
+                .filter(\.blocksTime)
+                .map { DayPlanEntry(start: $0.start, end: $0.end, title: $0.title) }
+        }
+        return try main.updateDailyNote(plan: plan, brief: brief)
     }
 
     /// The brief's answer gets today's due reminders as clickable rows underneath.
@@ -114,6 +145,41 @@ extension AppModel {
 
         case "digest":
             return runDigestCommand(input: input, text: text, in: conversation, context: context)
+
+        case "dayplan":
+            guard vaults.main != nil else { return .failed("No Obsidian vault is enabled. Choose one in Settings → Assistant → Obsidian.") }
+            guard !chat.isStreaming(conversation) else { return .failed("Wait for the current reply to finish.") }
+            if conversation.messages.isEmpty { conversation.title = text }
+            conversation.append(role: .user, content: text, task: .chat)
+            let reply = conversation.append(role: .assistant, content: "", task: .chat)
+            try? context.save()
+            chat.run(in: conversation, context: context) { [self] in
+                do {
+                    try await ensureCalendarAccess(reminders: false)
+                    let path = try await writeDayPlan(brief: nil)
+                    reply.content = "Today's events are in the Day Planner section of \(path)."
+                } catch {
+                    reply.errorText = error.localizedDescription
+                }
+            }
+            return .handled
+
+        case "triage":
+            return runTriageCommand(input: input, text: text, in: conversation, context: context)
+
+        case "news":
+            guard !chat.isStreaming(conversation) else { return .failed("Wait for the current reply to finish.") }
+            if conversation.messages.isEmpty { conversation.title = text }
+            conversation.append(role: .user, content: text, task: .chat)
+            let reply = conversation.append(role: .assistant, content: "_Checking your feeds…_", task: .chat)
+            try? context.save()
+            let topic = input.arguments.isEmpty ? nil : input.arguments
+            let news = news
+            chat.run(in: conversation, context: context) {
+                await news.refreshIfStale()
+                reply.content = news.markdown(topic: topic)
+            }
+            return .handled
 
         case "appointments":
             return runAppointmentsCommand(input: input, text: text, in: conversation, context: context)

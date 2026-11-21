@@ -12,11 +12,15 @@ public struct AppleMailSource: MailSource {
     }
 
     public func recent(days: Int, unreadOnly: Bool, limit: Int) async throws -> [MailMessage] {
-        try await run(["mode": "recent", "days": days, "unreadOnly": unreadOnly, "limit": limit], timeout: 40, as: [MailMessage].self)
+        await Self.accounts.record(
+            try await run(["mode": "recent", "days": days, "unreadOnly": unreadOnly, "limit": limit], timeout: 40, as: [MailMessage].self)
+        )
     }
 
     public func search(query: String?, sender: String?, days: Int, limit: Int) async throws -> [MailMessage] {
-        try await run(["mode": "search", "query": query ?? "", "sender": sender ?? "", "days": days, "limit": limit], timeout: 60, as: [MailMessage].self)
+        await Self.accounts.record(
+            try await run(["mode": "search", "query": query ?? "", "sender": sender ?? "", "days": days, "limit": limit], timeout: 60, as: [MailMessage].self)
+        )
     }
 
     /// Uses the raw source (≈50 ms) and parses it here; falls back to Mail's rendered content.
@@ -25,11 +29,11 @@ public struct AppleMailSource: MailSource {
             var message: MailMessage
             var source: String
         }
-        let raw = try await run(["mode": "read", "id": id], timeout: 60, as: Raw.self)
+        let raw = try await run(["mode": "read", "id": id, "accounts": await Self.accounts.map([id])], timeout: 60, as: Raw.self)
         let parsed = MIMEParser.parse(raw.source)
         var text = parsed.readableText
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            text = try await run(["mode": "content", "id": id], timeout: 90, as: String.self)
+            text = try await run(["mode": "content", "id": id, "accounts": await Self.accounts.map([id])], timeout: 90, as: String.self)
         }
         var message = raw.message
         message.bulk = BulkInfo.from(headers: parsed.headers)
@@ -44,16 +48,16 @@ public struct AppleMailSource: MailSource {
         let rows = try await run(
             ["mode": "recentHeaders", "days": days, "unreadOnly": unreadOnly, "limit": limit], timeout: 90, as: [Row].self
         )
-        return rows.map { row in
+        return await Self.accounts.record(rows.map { row in
             var message = row.message
             message.bulk = BulkInfo.from(headers: MIMEParser.headers(row.headers))
             return message
-        }
+        })
     }
 
     public func sources(ids: [String]) async throws -> [String: String] {
         guard !ids.isEmpty else { return [:] }
-        return try await run(["mode": "sources", "ids": ids], timeout: 30 + Double(ids.count) * 3, as: [String: String].self)
+        return try await run(["mode": "sources", "ids": ids, "accounts": await Self.accounts.map(ids)], timeout: 30 + Double(ids.count) * 3, as: [String: String].self)
     }
 
     /// Changes run one at a time: Mail handles Apple events serially, so parallel moves only wait on
@@ -62,7 +66,8 @@ public struct AppleMailSource: MailSource {
         guard !ids.isEmpty else { return 0 }
         return try await Self.changes.run {
             try await run(
-                ["mode": "move", "ids": ids, "target": destination.rawValue, "markRead": markRead, "from": origin.rawValue],
+                ["mode": "move", "ids": ids, "target": destination.rawValue, "markRead": markRead, "from": origin.rawValue,
+                 "accounts": await Self.accounts.map(ids)],
                 timeout: 60 + Double(ids.count) * 3, as: Int.self
             )
         }
@@ -71,14 +76,19 @@ public struct AppleMailSource: MailSource {
     public func markRead(ids: [String], _ read: Bool) async throws -> Int {
         guard !ids.isEmpty else { return 0 }
         return try await Self.changes.run {
-            try await run(["mode": "markRead", "ids": ids, "read": read], timeout: 30 + Double(ids.count) * 2, as: Int.self)
+            try await run(["mode": "markRead", "ids": ids, "read": read, "accounts": await Self.accounts.map(ids)], timeout: 30 + Double(ids.count) * 2, as: Int.self)
         }
     }
 
     static let changes = SerialQueue()
+    static let accounts = MessageAccounts()
 
     public func createDraft(to: [String], subject: String, body: String, replyTo: String?) async throws -> String {
-        try await run(["mode": "draft", "to": to, "subject": subject, "body": body, "replyTo": replyTo ?? ""], timeout: 60, as: String.self)
+        try await run(
+            ["mode": "draft", "to": to, "subject": subject, "body": body, "replyTo": replyTo ?? "",
+             "accounts": await Self.accounts.map(replyTo.map { [$0] } ?? [])],
+            timeout: 60, as: String.self
+        )
     }
 
     // MARK: Runner
@@ -159,28 +169,49 @@ public struct AppleMailSource: MailSource {
           return { message: message, headers: lines.filter(line => wanted.test(line)).join("\n") };
         });
       }
-      function find(id) {
+      // A message by Message-ID — only in its own account when that is known (the same ID can exist
+      // in several accounts). Unknown account and copies in several accounts: refuse, never guess.
+      function candidatesFor(id) {
         const bare = id.replace(/^<|>$/g, "");
-        for (const candidate of [id, bare, "<" + bare + ">"]) {
-          const found = Mail.inbox.messages.whose({ messageId: candidate });
-          if (found.length > 0) return found[0];
-        }
-        return null;
+        return [id, bare, "<" + bare + ">"];
       }
-      // Messages outside the inbox: look in that special folder of every account.
-      function findIn(id, kind) {
-        if (!kind || kind === "inbox") return find(id);
-        const bare = id.replace(/^<|>$/g, "");
-        for (const account of Mail.accounts()) {
-          const box = folder(account, kind);
-          if (!box) continue;
-          for (const candidate of [id, bare, "<" + bare + ">"]) {
-            const found = box.messages.whose({ messageId: candidate });
-            if (found.length > 0) return found[0];
+      function accountNamed(name) {
+        if (!name) return null;
+        try { const account = Mail.accounts.byName(name); account.name(); return account; } catch (e) { return null; }
+      }
+      function searchAccount(account, id, kind) {
+        const candidates = candidatesFor(id);
+        // The expected folder first, then the account's top-level folders (Gmail keeps inbox mail in
+        // "All Mail"). Never a full recursive scan: that can keep Mail busy for minutes.
+        const first = folder(account, kind || "inbox");
+        const boxes = (first ? [first] : []).concat(account.mailboxes());
+        for (const box of boxes) {
+          for (const candidate of candidates) {
+            try {
+              const found = box.messages.whose({ messageId: candidate });
+              if (found.length > 0) return found[0];
+            } catch (e) {}
           }
         }
         return null;
       }
+      function findIn(id, kind) {
+        const account = accountNamed((args.accounts || {})[id]);
+        if (account) return searchAccount(account, id, kind);
+        // Account unknown: the unified inbox, but only if the mail exists in exactly one account.
+        if (kind && kind !== "inbox") return null;
+        const matches = [];
+        for (const candidate of candidatesFor(id)) {
+          const found = Mail.inbox.messages.whose({ messageId: candidate });
+          for (let i = 0; i < found.length; i++) matches.push(found[i]);
+          if (matches.length > 0) break;
+        }
+        if (matches.length === 0) return null;
+        const owners = new Set(matches.map(m => { try { return m.mailbox().account().name(); } catch (e) { return "?"; } }));
+        if (owners.size > 1) throw new Error("This mail is in several accounts (" + Array.from(owners).join(", ") + "); run /triage again so I know which one.");
+        return matches[0];
+      }
+      function find(id) { return findIn(id, "inbox"); }
       function summary(m) {
         let account = "";
         try { account = m.mailbox().account().name(); } catch (e) {}
@@ -191,7 +222,7 @@ public struct AppleMailSource: MailSource {
       const folderNames = {
         junk: /^(junk|spam|junk e-?mail|junk-e-mail|bulk mail|werbung)$/i,
         archive: /^(archive|archiv|all mail|alle nachrichten)$/i,
-        trash: /^(trash|deleted messages|deleted items|papierkorb|gel(ö|oe)schte (objekte|elemente)|bin)$/i,
+        trash: /^(trash|deleted messages|deleted items|papierkorb|gel(ö|oe)schte (objekte|elemente|nachrichten)|bin|corbeille)$/i,
         inbox: /^(inbox|posteingang)$/i,
       };
       // The folder walk takes seconds per account; do it once per account and kind per call.
@@ -205,7 +236,8 @@ public struct AppleMailSource: MailSource {
         const queue = account.mailboxes().map(m => [m, 0]);
         while (queue.length) {
           const [box, depth] = queue.shift();
-          const name = box.name().replace(/^\[gmail\]\//i, "");
+          // Exchange may store "ö" as "o" + combining diaeresis; compare in composed form.
+          const name = box.name().normalize("NFC").replace(/^\[(gmail|google mail)\]\//i, "");
           if (folderNames[kind].test(name)) return box;
           if (depth < 1) { try { box.mailboxes().forEach(child => queue.push([child, depth + 1])); } catch (e) {} }
         }
@@ -251,9 +283,23 @@ public struct AppleMailSource: MailSource {
             args.ids.forEach(id => {
               const m = findIn(id, args.from);
               if (!m) return;
-              const target = folder(m.mailbox().account(), args.target);
-              if (!target) throw new Error("No " + args.target + " folder in account " + m.mailbox().account().name());
               if (args.markRead) m.readStatus = true;
+              // Delete: Mail's own command moves the message to the trash Mail uses for that account,
+              // whatever the folder is called (no name guessing).
+              if (args.target === "trash") {
+                Mail.delete(m);
+                moved++;
+                return;
+              }
+              let account = null;
+              try { account = m.mailbox().account(); } catch (e) {}
+              const target = account ? folder(account, args.target) : null;
+              if (!target) {
+                let names = "";
+                try { names = account.mailboxes.name().join(", "); } catch (e) {}
+                throw new Error("No " + args.target + " folder found in " + (account ? account.name() : "this message's account")
+                  + (names ? " (folders: " + names + ")" : ""));
+              }
               if (args.target === "junk") m.junkMailStatus = true;
               m.mailbox = target;
               moved++;
@@ -324,5 +370,24 @@ actor SerialQueue {
         }
         tail = Task { _ = try? await task.value }
         return try await task.value
+    }
+}
+
+/// Which account each listed message belongs to. The same Message-ID can exist in several accounts
+/// (one newsletter sent to two addresses); actions must only ever touch the copy in its own account.
+actor MessageAccounts {
+    private var accounts: [String: String] = [:]
+
+    @discardableResult
+    func record(_ messages: [MailMessage]) -> [MailMessage] {
+        for message in messages where !message.account.isEmpty { accounts[message.id] = message.account }
+        if accounts.count > 20_000 { accounts.removeAll() }
+        return messages
+    }
+
+    func map(_ ids: [String]) -> [String: String] {
+        var result: [String: String] = [:]
+        for id in ids { if let account = accounts[id] { result[id] = account } }
+        return result
     }
 }

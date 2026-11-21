@@ -29,6 +29,8 @@ public struct AppointmentProposal: Codable, Sendable, Hashable, Identifiable {
     public var status: Status
     /// The event created on "Add", for Undo.
     public var eventID: String?
+    /// The calendar it was added to (optional, so cards saved before still load).
+    public var calendarTitle: String?
 
     public var id: String { "\(mailID)|\(Int(start.timeIntervalSince1970))" }
 

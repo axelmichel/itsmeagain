@@ -70,9 +70,16 @@ final class MailWatcher {
         defer { isChecking = false }
         let preferences = app.mailPreferences
         // Read and unread: an invitation you opened but didn't act on is still worth asking about.
-        guard let messages = try? await app.mailSource.recent(days: Self.appointmentDays, unreadOnly: false, limit: 400)
+        guard let listed = try? await app.mailSource.recent(days: Self.appointmentDays, unreadOnly: false, limit: 400)
             .filter(preferences.includes)
         else { return }
+
+        // Your rules first (read / archive / delete / junk), for all mail from those senders in the window.
+        var ruled = RuleApplier.Summary()
+        if let summary = try? await RuleApplier.apply(listed, rules: app.senderRules, source: app.mailSource) {
+            ruled = summary
+        }
+        let messages = listed.filter { ruled.handled[$0.id] == nil }
 
         var important: [(address: String, messages: [MailMessage])] = []
         if app.notifyImportantMail {
@@ -87,11 +94,11 @@ final class MailWatcher {
             appointments = await scanForAppointments(messages)
         }
 
-        if !important.isEmpty || !appointments.isEmpty {
-            await report(important: important, appointments: appointments)
+        if !important.isEmpty || !appointments.isEmpty || ruled.total > 0 {
+            await report(important: important, appointments: appointments, ruled: ruled)
         }
         lastCheck = .now
-        persist(known: Set(messages.map(\.id)))
+        persist(known: Set(listed.map(\.id)))
     }
 
     /// Reads up to `scanBatch` unscanned mails: invitations exactly, other mails through the local
@@ -137,10 +144,14 @@ final class MailWatcher {
 
     // MARK: Reporting
 
-    private func report(important: [(address: String, messages: [MailMessage])], appointments: [AppointmentProposal]) async {
+    private func report(important: [(address: String, messages: [MailMessage])], appointments: [AppointmentProposal], ruled: RuleApplier.Summary) async {
         let context = container.mainContext
         let conversation = watchConversation(in: context)
         var lines: [String] = []
+        if ruled.total > 0 {
+            lines.append("_Your rules: \(ruled.text)._")
+            if !important.isEmpty || !appointments.isEmpty { lines.append("") }
+        }
         if !important.isEmpty {
             lines.append("**New from important senders**")
             for group in important {

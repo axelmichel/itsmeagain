@@ -1,6 +1,8 @@
 import AppKit
+import UniformTypeIdentifiers
 import Mail
 import Memory
+import News
 import Obsidian
 import PersonalData
 import SwiftUI
@@ -53,6 +55,7 @@ struct AssistantSettings: View {
             MailSettingsSection()
                 if app.mailEnabled { MailRulesSection() }
                 ObsidianSettingsSection()
+                NewsSettingsSection()
                 MemorySettingsSection()
 
             Section {
@@ -302,17 +305,125 @@ private struct ObsidianSettingsSection: View {
                 }
             }
             Toggle("Add to the daily note without asking", isOn: $app.dailyNoteWithoutAsking)
+            Toggle("Write the morning brief and today's events into the daily note", isOn: $app.briefToDailyNote)
+            ForEach(enabled) { vault in
+                let status = app.vaultIndex.status[vault.path]
+                LabeledContent("Search index · \(vault.name)") {
+                    Text(status?.progress ?? status?.error.map { "Not ready: \($0)" }
+                        ?? status?.lastIndexed.map { "\(status?.files ?? 0) notes · \($0.formatted(.relative(presentation: .named)))" }
+                        ?? "Waiting…")
+                        .foregroundStyle(status?.error == nil ? Color.secondary : Color.orange)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Update Index Now") { Task { await app.vaultIndex.indexAll() } }
+                    .disabled(app.vaultIndex.isIndexing)
+                Button("Rebuild Index") { app.vaultIndex.rebuild() }
+                    .disabled(app.vaultIndex.isIndexing)
+            }
         } header: {
             Text("Obsidian")
         } footer: {
             Text("""
-                Chat can search and read the enabled vaults and list their tasks. It writes only into the main vault: \
-                lines in today's daily note, new notes in Inbox/, ticked tasks — each after your approval (or because \
-                you typed /note, /capture or ticked it yourself). Nothing is deleted, renamed or overwritten, and the \
+                Chat can search (by meaning, with your local embedding model, and by words) and read the enabled vaults \
+                and list their tasks. It writes lines in today's daily note, new notes in Inbox/ and ticked tasks — \
+                each after your approval, or because you typed /note, /capture, /dayplan or ticked it yourself. \
+                Commands use the main vault unless you start with @vault, e.g. /capture @cooking Leek soup — …. Nothing is deleted, renamed or overwritten, and the \
                 app never commits: changes appear as uncommitted changes in your vault's git.
                 """)
             .foregroundStyle(.secondary)
         }
         .onAppear { app.detectedVaults = Vault.detect() }
+    }
+}
+
+private struct NewsSettingsSection: View {
+    @Environment(AppModel.self) private var app
+    @State private var newURL = ""
+    @State private var adding = false
+    @State private var message: String?
+
+    var body: some View {
+        @Bindable var app = app
+        let news = app.news
+        Section {
+            LabeledContent("Interests") {
+                TextField(NewsDigestDefaults.topics.joined(separator: ", "), text: $app.newsletterTopics, axis: .vertical)
+                    .lineLimit(1...3)
+            }
+            DisclosureGroup("Feeds (\(news.library.feeds.filter(\.enabled).count) of \(news.library.feeds.count) on)") {
+                ForEach(news.library.feeds) { feed in
+                    HStack {
+                        Toggle(isOn: Binding(get: { feed.enabled }, set: { news.setEnabled(feed.url, $0) })) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(feed.title)
+                                Text(feed.lastError.map { "Couldn't load: \($0)" } ?? feed.url)
+                                    .font(.caption)
+                                    .foregroundStyle(feed.lastError == nil ? Color.secondary : Color.orange)
+                                    .lineLimit(1)
+                            }
+                        }
+                        Button("Remove", systemImage: "minus.circle") { news.remove(feed.url) }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.borderless)
+                    }
+                }
+            }
+            HStack {
+                TextField("Add a feed: https://…/feed.xml", text: $newURL)
+                    .onSubmit(add)
+                if adding { ProgressView().controlSize(.small) }
+                Button("Add", action: add).disabled(newURL.isEmpty || adding)
+            }
+            HStack {
+                Button("Import OPML…", action: importOPML)
+                Button("Restore Suggested Feeds") { news.restoreDefaults() }
+                Spacer()
+                if news.isRefreshing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Refresh Now") { Task { await news.refresh() } }
+                }
+            }
+            if let message {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+            }
+            Text("\(news.library.items.count) articles from the last 30 days" + (news.lastRefresh.map { " · updated \($0.formatted(.relative(presentation: .named)))" } ?? ""))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } header: {
+            Text("News")
+        } footer: {
+            Text("""
+                Public RSS/Atom feeds — the suggested ones are sources daily.dev aggregates. Refreshed hourly; articles \
+                are matched to your interests (and projects from your memory) on this Mac. /news lists today's best \
+                matches, Chat can ask about them, and the morning brief ends with three headlines.
+                """)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private func add() {
+        let url = newURL
+        adding = true
+        Task {
+            do {
+                let feed = try await app.news.addFeed(url)
+                message = "Added \(feed.title)."
+                newURL = ""
+            } catch {
+                message = "Couldn't add it: \(error.localizedDescription)"
+            }
+            adding = false
+        }
+    }
+
+    private func importOPML() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "opml") ?? .xml, .xml]
+        guard panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
+        let added = app.news.importOPML(data)
+        message = added == 0 ? "No new feeds in that file." : "Imported \(added) feeds."
     }
 }
