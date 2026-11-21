@@ -114,13 +114,38 @@ import Providers
                     print("Saved: Clippings/" + u[-3:] + ".md")
             """.write(to: tool, atomically: true, encoding: .utf8)
         var events: [YouTubeImport.Event] = []
-        for await event in YouTubeImport.createNotes(urls: ["https://y/abc", "https://y/bad", "https://y/xyz"], python: URL(filePath: "/usr/bin/python3"), tool: tool) {
+        for await event in YouTubeImport.createNotes(urls: ["https://y/abc", "https://y/bad", "https://y/xyz"], python: URL(filePath: "/usr/bin/python3"), tool: tool, pause: .zero) {
             events.append(event)
         }
         #expect(events.contains(.saved(url: "https://y/abc", path: "Clippings/abc.md")))
         #expect(events.contains(.failed(url: "https://y/bad", reason: "no transcript")))
         #expect(events.contains(.saved(url: "https://y/xyz", path: "Clippings/xyz.md")))
-        #expect(events.last == .finished(code: 0))
+        #expect(events.last == .finished(code: 1), "one failed")
+    }
+
+    @Test func multiLineErrorsAndStopOnBlock() async throws {
+        let tool = FileManager.default.temporaryDirectory.appending(path: "fake-yt-\(UUID().uuidString).py")
+        defer { try? FileManager.default.removeItem(at: tool) }
+        try """
+            import sys
+            u = sys.argv[1]
+            if "off" in u:
+                print(f"FAILED {u}: \\nCould not retrieve a transcript for the video {u}! This is most likely caused by:\\n\\nSubtitles are disabled for this video", file=sys.stderr)
+            elif "block" in u:
+                print(f"FAILED {u}: \\nCould not retrieve a transcript!\\nYouTube is blocking requests from your IP. This usually is due to", file=sys.stderr)
+            else:
+                print("Saved: Clippings/" + u[-3:] + ".md")
+            """.write(to: tool, atomically: true, encoding: .utf8)
+        var events: [YouTubeImport.Event] = []
+        let urls = ["https://y/off", "https://y/ok1", "https://y/block", "https://y/ok2", "https://y/ok3"]
+        for await event in YouTubeImport.createNotes(urls: urls, python: URL(filePath: "/usr/bin/python3"), tool: tool, pause: .zero) {
+            events.append(event)
+        }
+        #expect(events.contains(.failed(url: "https://y/off", reason: "This video has no transcript (subtitles are off).")))
+        #expect(events.contains(.saved(url: "https://y/ok1", path: "Clippings/ok1.md")))
+        #expect(events.contains(.failed(url: "https://y/block", reason: FailureReason.blocked)))
+        #expect(events.contains(.failed(url: "https://y/ok2", reason: FailureReason.notStartedBlocked)), "stops at the block")
+        #expect(!events.contains(.saved(url: "https://y/ok3", path: "Clippings/ok3.md")))
     }
 }
 

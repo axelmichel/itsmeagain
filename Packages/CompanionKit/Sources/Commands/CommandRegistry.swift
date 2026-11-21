@@ -124,6 +124,7 @@ public struct CommandRegistry: Sendable {
         CommandSpec(name: "find", summary: "Search your notes by meaning and words", argumentHint: "[@vault] <words>", kind: .native(handler: "find"), scope: .personal),
         CommandSpec(name: "yt-playlist", summary: "Your YouTube playlist: pick videos to turn into notes", kind: .native(handler: "yt-playlist"), scope: .personal),
         CommandSpec(name: "yt", summary: "Notes from YouTube videos (then sorting)", argumentHint: "<url> [url …]", kind: .native(handler: "yt"), scope: .personal),
+        CommandSpec(name: "yt-next", summary: "The oldest new playlist video as a note (for an hourly automation)", argumentHint: "[count]", kind: .native(handler: "yt-next"), scope: .personal),
         CommandSpec(name: "einordnen", summary: "Sort notes from Clippings/ into topic folders (you confirm)", kind: .native(handler: "einordnen"), scope: .personal, aliases: ["sort"]),
         CommandSpec(name: "dayplan", summary: "Today's events into the daily note (Day Planner)", kind: .native(handler: "dayplan"), scope: .personal),
     ]

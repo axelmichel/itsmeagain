@@ -21,8 +21,10 @@ public struct PlaylistVideo: Codable, Sendable, Hashable, Identifiable {
 public enum YouTubeImport {
     public static let defaultTool = URL.homeDirectory.appending(path: "development/private/tools/yt2obsidian.py")
     public static let defaultPython = URL.homeDirectory.appending(path: "development/private/tools/.venv/bin/python")
-    /// The skill's own limit: YouTube blocks transcript requests after about 15 in a row.
-    public static let batchLimit = 15
+    /// Per run: YouTube blocks transcript requests after about 15 in a row (seen 2026-11-19 and -21).
+    public static let batchLimit = 10
+    /// Pause between videos, to stay under YouTube's rate limit.
+    public static let pause: Duration = .seconds(20)
 
     /// The playlist id from `_recherche-quellen.md` ("YouTube-Playlist" section).
     public static func playlistID(_ store: NoteStore) -> String? {
@@ -59,11 +61,44 @@ public enum YouTubeImport {
         case finished(code: Int32)
     }
 
-    /// Runs `yt2obsidian.py` for the URLs (one Ollama start for all, like the skill says). Streams events;
-    /// the tool handles the URLs in order, so the n-th result belongs to the n-th URL.
+    /// Runs `yt2obsidian.py` once per video with a pause in between, and stops when YouTube blocks
+    /// (the rest would fail the same way): those are reported as not started.
     public static func createNotes(
-        urls: [String], python: URL = defaultPython, tool: URL = defaultTool
+        urls: [String], python: URL = defaultPython, tool: URL = defaultTool, pause: Duration = pause
     ) -> AsyncStream<Event> {
+        AsyncStream { continuation in
+            let task = Task {
+                var failures = 0
+                for (index, url) in urls.enumerated() {
+                    if Task.isCancelled { break }
+                    if index > 0 { try? await Task.sleep(for: pause) }
+                    var blocked = false
+                    for await event in runTool(urls: [url], python: python, tool: tool) {
+                        switch event {
+                        case .finished: break
+                        case .failed(_, let reason):
+                            failures += 1
+                            blocked = reason == FailureReason.blocked
+                            continuation.yield(event)
+                        default: continuation.yield(event)
+                        }
+                    }
+                    if blocked {
+                        for rest in urls.dropFirst(index + 1) {
+                            continuation.yield(.failed(url: rest, reason: FailureReason.notStartedBlocked))
+                        }
+                        break
+                    }
+                }
+                continuation.yield(.finished(code: failures == 0 ? 0 : 1))
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// One run of the tool.
+    static func runTool(urls: [String], python: URL, tool: URL) -> AsyncStream<Event> {
         AsyncStream { continuation in
             let process = Process()
             process.executableURL = python
@@ -89,6 +124,7 @@ public enum YouTubeImport {
             process.terminationHandler = { process in
                 // Let the last output drain before reporting the end.
                 _ = finished.wait(timeout: .now() + 2)
+                parser.finish()
                 continuation.yield(.finished(code: process.terminationStatus))
                 continuation.finish()
             }
@@ -148,12 +184,33 @@ extension NoteStore {
     }
 }
 
-/// Turns the tool's output (spinner lines end in \r, results in \n) into events.
+/// Plain-language reasons for the tool's errors (the transcript library's messages are long).
+public enum FailureReason {
+    public static let blocked = "YouTube is blocking transcripts from this connection for now (too many in a row) — try again later, often after a few hours."
+    public static let notStartedBlocked = "Not started: YouTube is blocking for now — try again later."
+
+    public static func friendly(_ raw: String) -> String {
+        let text = raw.lowercased()
+        if text.contains("blocking requests from your ip") || text.contains("ipblocked") || text.contains("too many requests") { return blocked }
+        if text.contains("subtitles are disabled") || text.contains("transcriptsdisabled") { return "This video has no transcript (subtitles are off)." }
+        if text.contains("no transcripts were found") || text.contains("notranscriptfound") { return "No transcript in German, English or French." }
+        if text.contains("video is unavailable") || text.contains("videounavailable") { return "Video unavailable (private, removed or region-locked)." }
+        if text.contains("age") && text.contains("restrict") { return "Age-restricted video: no transcript without signing in." }
+        if text.contains("connection refused") && text.contains("11434") { return "Ollama isn't running." }
+        if text.contains("invalid json") { return "The model didn't return a usable summary — try again." }
+        let firstLine = raw.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? "failed"
+        return String(firstLine.prefix(200))
+    }
+}
+
+/// Turns the tool's output (spinner lines end in \r, results in \n) into events. A failure's message
+/// can span several lines (the transcript library's errors do); it is collected until the next result.
 final class ToolOutputParser: @unchecked Sendable {
     private let lock = NSLock()
     private let urls: [String]
     private var done = 0
     private var buffer = ""
+    private var pending: (url: String, lines: [String])?
     private let continuation: AsyncStream<YouTubeImport.Event>.Continuation
 
     init(urls: [String], continuation: AsyncStream<YouTubeImport.Event>.Continuation) {
@@ -170,20 +227,39 @@ final class ToolOutputParser: @unchecked Sendable {
         for raw in lines { handle(raw.trimmingCharacters(in: .whitespaces)) }
     }
 
+    /// End of output: report a failure still being collected.
+    func finish() {
+        lock.lock()
+        defer { lock.unlock() }
+        if !buffer.isEmpty { handle(buffer.trimmingCharacters(in: .whitespaces)); buffer = "" }
+        flushPending()
+    }
+
+    private func flushPending() {
+        guard let failure = pending else { return }
+        pending = nil
+        continuation.yield(.failed(url: failure.url, reason: FailureReason.friendly(failure.lines.joined(separator: "\n"))))
+    }
+
     private func handle(_ line: String) {
         guard !line.isEmpty else { return }
         // A spinner line without a final \r can run into the result on the same line: search, don't anchor.
         if let saved = line.range(of: "Saved:") {
+            flushPending()
             let url = done < urls.count ? urls[done] : nil
             done += 1
             continuation.yield(.saved(url: url, path: line[saved.upperBound...].trimmingCharacters(in: .whitespaces)))
         } else if let failed = line.range(of: "FAILED ") {
+            flushPending()
             let rest = line[failed.upperBound...]
-            let separator = rest.range(of: ": ")
-            let url = separator.map { String(rest[..<$0.lowerBound]) } ?? String(rest)
-            let reason = separator.map { String(rest[$0.upperBound...]) } ?? "failed"
+            // "FAILED <url>: <message>" — the message may also start on the next line.
+            let separator = rest.range(of: ": ") ?? (rest.hasSuffix(":") ? rest.index(before: rest.endIndex)..<rest.endIndex : nil)
+            let url = (separator.map { String(rest[..<$0.lowerBound]) } ?? String(rest)).trimmingCharacters(in: CharacterSet(charactersIn: ": "))
+            let message = separator.map { String(rest[$0.upperBound...]).trimmingCharacters(in: .whitespaces) } ?? ""
             done += 1
-            continuation.yield(.failed(url: url, reason: reason))
+            pending = (url, message.isEmpty ? [] : [message])
+        } else if pending != nil {
+            pending?.lines.append(line)
         } else if line.hasSuffix("characters)") {
             continuation.yield(.progress(line))
         } else if let range = line.range(of: #"(Fetching|Summarizing|Merging)[^–]*"#, options: .regularExpression) {

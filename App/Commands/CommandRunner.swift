@@ -174,7 +174,7 @@ extension AppModel {
             try? context.save()
             return .handled
 
-        case "yt-playlist", "yt", "einordnen":
+        case "yt-playlist", "yt", "yt-next", "einordnen":
             return runClippingCommand(handler, input: input, text: text, in: conversation, context: context)
 
         case "jira", "myjira":

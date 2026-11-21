@@ -71,6 +71,12 @@ struct ContentView: View {
                                         trigger: .daily(hour: 7, minute: 45, weekdays: AutomationTrigger.weekdaysOnly)
                                     )
                                 }
+                                Button("Add YouTube: Next Video (/yt-next, hourly)") {
+                                    newAutomation(name: "YouTube: next video", command: "/yt-next", trigger: .interval(minutes: 60), notify: false)
+                                }
+                                Button("Add Sort New Notes (/einordnen, daily 18:00)") {
+                                    newAutomation(name: "Sort new notes", command: "/einordnen", trigger: .daily(hour: 18, minute: 0, weekdays: [1, 2, 3, 4, 5, 6, 7]))
+                                }
                                 Button("Add Newsletter Digest (/digest, weekdays 08:00)") {
                                     newAutomation(
                                         name: "Newsletter digest", command: "/digest",

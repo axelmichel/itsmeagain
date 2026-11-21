@@ -28,6 +28,12 @@ struct PlaylistView: View {
                     )) { Text("New (\(newVideos.count))").font(.callout.weight(.semibold)) }
                     .toggleStyle(.checkbox)
                     Spacer()
+                    let failedOnes = newVideos.filter { $0.failure != nil }
+                    if !failedOnes.isEmpty {
+                        Button("Retry Failed (\(failedOnes.count))") { selection = Set(failedOnes.map(\.id)) }
+                            .buttonStyle(.borderless)
+                            .help("Selects the videos that failed; then Create Notes")
+                    }
                     let count = selection.count
                     Button(count == 0 ? "Create Notes" : "Create \(count) \(count == 1 ? "Note" : "Notes")", action: create)
                         .buttonStyle(.borderedProminent)
@@ -75,7 +81,7 @@ struct PlaylistView: View {
                 Text(note).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
             }
             if let failure = video.failure {
-                Text(failure).font(.caption).foregroundStyle(.orange).lineLimit(1)
+                Text(failure).font(.caption).foregroundStyle(.orange).lineLimit(2).frame(maxWidth: 260, alignment: .trailing)
             }
         }
         .padding(.horizontal, 8)
@@ -92,6 +98,7 @@ struct PlaylistView: View {
             return
         }
         selection.removeAll()
+        for video in chosen { update(video.url) { $0.failure = nil } }
         let reply = conversation.append(role: .assistant, content: "", task: .chat)
         try? context.save()
         let urls = chosen.map(\.url)
