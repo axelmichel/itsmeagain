@@ -149,6 +149,13 @@ extension AppModel {
         case "spelling", "flashcard", "learn":
             return runLearningCommand(handler, input: input, text: text, in: conversation, context: context)
 
+        case "mcp":
+            if conversation.messages.isEmpty { conversation.title = "MCP servers" }
+            conversation.append(role: .user, content: text, task: conversation.task)
+            conversation.append(role: .assistant, content: mcp.markdown + "\n\n_Tools from MCP servers are offered in Chat (local models only). Each call asks first unless you marked the tool read-only in Settings._", task: conversation.task)
+            try? context.save()
+            return .handled
+
         case "weather":
             guard weather.place != nil else { return .failed("Choose your place first: Settings → Assistant → Weather.") }
             guard !chat.isStreaming(conversation) else { return .failed("Wait for the current reply to finish.") }

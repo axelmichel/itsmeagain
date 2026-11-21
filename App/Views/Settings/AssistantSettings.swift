@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 import Mail
 import Jira
 import Weather
+import MCP
 import Memory
 import News
 import Obsidian
@@ -61,6 +62,7 @@ struct AssistantSettings: View {
                 JiraSettingsSection()
                 WeatherSettingsSection()
                 LearningSettingsSection()
+                MCPSettingsSection()
                 MemorySettingsSection()
 
             Section {
@@ -629,5 +631,152 @@ private struct LearningSettingsSection: View {
             Text("/spelling checks a text (macOS spell checker + your local model), /flashcard makes a card, /learn reviews due cards first. Everything stays on this Mac.")
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+private struct MCPSettingsSection: View {
+    @Environment(AppModel.self) private var app
+    @State private var adding = false
+    @State private var name = ""
+    @State private var kind: MCPServerConfig.Kind = .stdio
+    @State private var commandLine = ""
+    @State private var url = ""
+    @State private var headerName = "Authorization"
+    @State private var headerValue = ""
+    @State private var expanded: Set<UUID> = []
+
+    var body: some View {
+        let mcp = app.mcp
+        Section {
+            ForEach(mcp.servers) { server in
+                DisclosureGroup(isExpanded: Binding(
+                    get: { expanded.contains(server.id) },
+                    set: { on in if on { expanded.insert(server.id) } else { expanded.remove(server.id) } }
+                )) {
+                    if let error = server.lastError {
+                        Text(error).font(.caption).foregroundStyle(.orange)
+                    }
+                    ForEach(server.tools) { tool in
+                        HStack(alignment: .top) {
+                            Toggle(isOn: Binding(get: { tool.enabled }, set: { mcp.setTool(tool.name, of: server.id, enabled: $0) })) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(tool.name).font(.callout.monospaced())
+                                    if !tool.description.isEmpty {
+                                        Text(tool.description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                    }
+                                }
+                            }
+                            Spacer()
+                            Toggle("Read-only", isOn: Binding(get: { tool.readOnly }, set: { mcp.setTool(tool.name, of: server.id, readOnly: $0) }))
+                                .toggleStyle(.checkbox)
+                                .font(.caption)
+                                .help("Only mark tools that never change anything: they then run without asking")
+                                .disabled(!tool.enabled)
+                        }
+                    }
+                    HStack {
+                        Button("Remove Server", role: .destructive) { mcp.remove(server.id) }
+                        Spacer()
+                        if mcp.connecting.contains(server.id) { ProgressView().controlSize(.small) }
+                        Button("Connect & List Tools") { Task { await mcp.connect(server.id) } }
+                            .disabled(mcp.connecting.contains(server.id))
+                    }
+                } label: {
+                    Toggle(isOn: Binding(
+                        get: { server.enabled },
+                        set: { on in var updated = server; updated.enabled = on; mcp.update(updated) }
+                    )) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(server.name)
+                            Text((server.kind == .stdio ? ([server.command] + server.arguments).joined(separator: " ") : server.url)
+                                 + " · \(server.tools.filter(\.enabled).count)/\(server.tools.count) tools")
+                                .font(.caption).foregroundStyle(server.lastError == nil ? Color.secondary : Color.orange).lineLimit(1)
+                        }
+                    }
+                }
+            }
+            let importable = MCPConfigImport.found().filter { found in !mcp.servers.contains { $0.name == found.config.name } }
+            if !importable.isEmpty {
+                Menu("Import from Claude") {
+                    ForEach(importable, id: \.config.name) { found in
+                        Button(found.config.name + (found.note.map { " — \($0)" } ?? "") + (found.omittedSecrets.isEmpty ? "" : " (enter \(found.omittedSecrets.joined(separator: ", ")) after import)")) {
+                            mcp.add(found.config)
+                        }
+                    }
+                }
+            }
+            DisclosureGroup("Add an MCP server", isExpanded: $adding) {
+                TextField("Name", text: $name, prompt: Text("e.g. Files"))
+                Picker("Type", selection: $kind) {
+                    Text("Local program").tag(MCPServerConfig.Kind.stdio)
+                    Text("Remote (https)").tag(MCPServerConfig.Kind.http)
+                }
+                .pickerStyle(.segmented)
+                if kind == .stdio {
+                    TextField("Command", text: $commandLine, prompt: Text("npx -y @modelcontextprotocol/server-filesystem ~/Documents"))
+                } else {
+                    TextField("Address", text: $url, prompt: Text("https://example.com/mcp"))
+                    HStack {
+                        TextField("Header", text: $headerName).frame(maxWidth: 140)
+                        SecureField("Value (kept in the Keychain)", text: $headerValue, prompt: Text("Bearer …"))
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Button("Add and Connect", action: add)
+                        .disabled(name.isEmpty || (kind == .stdio ? commandLine.isEmpty : !url.lowercased().hasPrefix("https://")))
+                }
+            }
+        } header: {
+            Text("MCP servers")
+        } footer: {
+            Text("""
+                Tools from these servers are offered in Chat on your local model. They are treated strictly: private, \
+                and every call asks first unless you mark the tool read-only. Tools of remote servers are also locked \
+                once mail or other private data was read in the same answer. Servers with a browser sign-in (OAuth) \
+                aren't supported yet.
+                """)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private func add() {
+        var server: MCPServerConfig
+        var secrets: [String: String] = [:]
+        if kind == .stdio {
+            let parts = CommandInputSplit.split(commandLine)
+            server = MCPServerConfig(name: name, kind: .stdio, command: parts.first ?? "", arguments: Array(parts.dropFirst())
+                .map { ($0 as NSString).expandingTildeInPath })
+        } else {
+            let header = headerName.trimmingCharacters(in: .whitespaces)
+            server = MCPServerConfig(name: name, kind: .http, url: url.trimmingCharacters(in: .whitespaces),
+                                     secretHeaders: header.isEmpty || headerValue.isEmpty ? [] : [header])
+            if !header.isEmpty { secrets[header] = headerValue }
+        }
+        app.mcp.add(server, secrets: secrets)
+        name = ""; commandLine = ""; url = ""; headerValue = ""
+        adding = false
+    }
+}
+
+/// Shell-like splitting for the command field ("quoted words" stay together).
+enum CommandInputSplit {
+    static func split(_ text: String) -> [String] {
+        var parts: [String] = []
+        var current = ""
+        var quote: Character?
+        for character in text {
+            if let open = quote {
+                if character == open { quote = nil } else { current.append(character) }
+            } else if character == "\"" || character == "'" {
+                quote = character
+            } else if character.isWhitespace {
+                if !current.isEmpty { parts.append(current); current = "" }
+            } else {
+                current.append(character)
+            }
+        }
+        if !current.isEmpty { parts.append(current) }
+        return parts
     }
 }

@@ -22,6 +22,7 @@ let package = Package(
         .library(name: "Jira", targets: ["Jira"]),
         .library(name: "Weather", targets: ["Weather"]),
         .library(name: "Learning", targets: ["Learning"]),
+        .library(name: "MCP", targets: ["MCP"]),
     ],
     dependencies: [
         .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.14.0"),
@@ -43,10 +44,11 @@ let package = Package(
         .target(name: "Jira", dependencies: ["CompanionCore", "Tools"]),
         .target(name: "Weather"),
         .target(name: "Learning", dependencies: ["CompanionCore"]),
+        .target(name: "MCP", dependencies: ["CompanionCore", "Tools"]),
         .target(name: "Persistence", dependencies: ["CompanionCore", "Routing", "Tools", "Automation", "PersonalData", "Mail", "Obsidian", "Jira", "Learning"]),
         .testTarget(
             name: "CompanionKitTests",
-            dependencies: ["CompanionCore", "Providers", "Persistence", "Routing", "AppleIntelligence", "Tools", "Knowledge", "Commands", "Automation", "PersonalData", "Mail", "Memory", "Obsidian", "News", "Jira", "Weather", "Learning"]
+            dependencies: ["CompanionCore", "Providers", "Persistence", "Routing", "AppleIntelligence", "Tools", "Knowledge", "Commands", "Automation", "PersonalData", "Mail", "Memory", "Obsidian", "News", "Jira", "Weather", "Learning", "MCP"]
         ),
     ]
 )

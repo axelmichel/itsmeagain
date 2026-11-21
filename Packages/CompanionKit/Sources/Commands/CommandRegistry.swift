@@ -67,6 +67,7 @@ public struct CommandRegistry: Sendable {
             aliases: ["add"]
         ),
         CommandSpec(name: "weather", summary: "Weather now and the next hours", kind: .native(handler: "weather"), scope: .general),
+        CommandSpec(name: "mcp", summary: "Your MCP servers and their tools", kind: .native(handler: "mcp"), scope: .general),
         CommandSpec(name: "free", summary: "Free time in your calendar", argumentHint: "<30m|1h> [day]", kind: .native(handler: "free"), scope: .personal),
         CommandSpec(
             name: "planday", summary: "Plan the day: a list of tasks → reminders to tick off", argumentHint: "one task per line (14:00 … sets a time)",

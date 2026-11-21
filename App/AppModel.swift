@@ -92,6 +92,7 @@ final class AppModel {
     let jira = JiraModel()
     let weather = WeatherModel()
     let learning = LearningModel()
+    let mcp = MCPModel()
 
     /// The right panel: shown or not, and which widgets (commands) are hooked into it.
     var showsPanel: Bool = UserDefaults.standard.bool(forKey: "showsPanel") {
@@ -282,6 +283,7 @@ final class AppModel {
         tools += ObsidianToolbox.tools(vaults)
         let news = news
         tools.append(NewsTool(ranking: news.ranking) { await MainActor.run { news.library.items } })
+        tools += mcp.tools
         if jira.isConfigured {
             let directory = jira.directory
             tools += [JiraIssueTool(directory: directory), JiraSearchTool(directory: directory)]

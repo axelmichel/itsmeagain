@@ -28,7 +28,7 @@ targets:
       - App
     dependencies:
       - package: CompanionKit
-        products: [CompanionCore, Providers, Persistence, Routing, AppleIntelligence, Tools, Knowledge, Commands, Automation, PersonalData, Mail, Memory, Obsidian, News, Jira, Weather, Learning]
+        products: [CompanionCore, Providers, Persistence, Routing, AppleIntelligence, Tools, Knowledge, Commands, Automation, PersonalData, Mail, Memory, Obsidian, News, Jira, Weather, Learning, MCP]
       - package: Highlighter
     entitlements:
       path: App/ItsMeAgain.entitlements
