@@ -1,6 +1,6 @@
 # Plan: Personal assistant (iteration 2)
 
-Status: 2.1 implemented (awaiting review) · Updated: 2026-11-21
+Status: 2.1 done, 2.2 implemented (awaiting review) · Updated: 2026-11-21
 
 ## 1. Goal
 
@@ -312,7 +312,12 @@ card; private tools never reach a cloud provider (unit test); missed runs run on
   attendees, response status), travel time; dates in tools as ISO 8601, displayed with weekday.
 - Commands: `/today`, `/tomorrow`, `/week`, `/agenda`, `/free`, `/remind`, `/reminders`.
 - Settings → Assistant → Calendars: which calendars and lists are visible.
+- Interactive reminder lists in the transcript (`/reminders`, `/today`, `/brief`): tick off with
+  undo, change the due date, delete (confirmed) — direct user actions, no approval card. Messages
+  carry structured attachments for this; the model receives a text form.
 - Template **Morning brief** (calendar + reminders for now; mail and news join later).
+- Model check (2026-11-21, fake calendar, Chat prompt): `gemma4:26b` 3/3 tasks in 4–17 s,
+  `qwen3:30b-a3b` 2/3 in 17–28 s → Chat keeps `gemma4:26b`.
 
 **Acceptance:** fake `CalendarStore` tests (ranges, all-day, recurrence, DST, free-slot search);
 read-only live test gated by `ASSISTANT_LIVE=1`; `/today` renders in < 1 s without a model.

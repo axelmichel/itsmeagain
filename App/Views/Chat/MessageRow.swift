@@ -42,6 +42,12 @@ struct MessageRow: View {
                 } else {
                     MarkdownView(markdown: message.content)
                 }
+                ForEach(Array(message.attachments.enumerated()), id: \.offset) { index, attachment in
+                    switch attachment {
+                    case .reminders(let title, let items):
+                        ReminderListView(message: message, index: index, title: title, items: items)
+                    }
+                }
                 if let error = message.errorText {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)

@@ -28,7 +28,7 @@ targets:
       - App
     dependencies:
       - package: CompanionKit
-        products: [CompanionCore, Providers, Persistence, Routing, AppleIntelligence, Tools, Knowledge, Commands, Automation]
+        products: [CompanionCore, Providers, Persistence, Routing, AppleIntelligence, Tools, Knowledge, Commands, Automation, PersonalData]
       - package: Highlighter
     entitlements:
       path: App/ItsMeAgain.entitlements
@@ -39,6 +39,8 @@ targets:
         com.apple.security.network.client: true
         com.apple.security.files.user-selected.read-only: true
         com.apple.security.files.bookmarks.app-scope: true
+        # Hardened runtime: EventKit access (calendars and reminders).
+        com.apple.security.personal-information.calendars: true
     settings:
       base:
         PRODUCT_NAME: ItsMeAgain
@@ -48,6 +50,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: ItsMeAgain
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: ItsMeAgain shows your schedule, finds free time and creates events you approve. Everything stays on this Mac.
+        INFOPLIST_KEY_NSRemindersFullAccessUsageDescription: ItsMeAgain lists your reminders and creates the ones you ask for. Everything stays on this Mac.
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "-"

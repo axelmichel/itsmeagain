@@ -7,7 +7,8 @@ import Observation
 @MainActor
 @Observable
 final class CommandCenter {
-    private(set) var registry = CommandRegistry(builtIns: CommandRegistry.general)
+    static let builtIns = CommandRegistry.general + CommandRegistry.calendar
+    private(set) var registry = CommandRegistry(builtIns: CommandCenter.builtIns)
     private(set) var fileErrors: [CommandLibrary.FileError] = []
     let directory = AppData.directory.appending(path: "Commands", directoryHint: .isDirectory)
     @ObservationIgnored private var watcher: DispatchSourceFileSystemObject?
@@ -20,7 +21,7 @@ final class CommandCenter {
 
     func reload() {
         let (commands, errors) = CommandLibrary.load(from: directory)
-        registry = CommandRegistry(builtIns: CommandRegistry.general, user: commands)
+        registry = CommandRegistry(builtIns: Self.builtIns, user: commands)
         fileErrors = errors
     }
 

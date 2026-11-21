@@ -10,6 +10,7 @@ struct CommandInvocation {
     var task: TaskKind
     var tools: [String]?
     var autoApproved: Set<String>
+    var finalize: (@MainActor (StoredMessage) async -> Void)?
 }
 
 enum CommandOutcome: Equatable {
@@ -47,9 +48,22 @@ extension AppModel {
         case .prompt(let prompt):
             let expanded = TemplateExpander.expand(prompt.template, input: input)
             send(text, in: target, context: context, command: CommandInvocation(
-                modelText: expanded, task: prompt.task, tools: prompt.tools, autoApproved: prompt.autoApproved
+                modelText: expanded, task: prompt.task, tools: prompt.tools,
+                autoApproved: prompt.autoApproved.union(prompt.task == .chat ? standingApprovals : []),
+                finalize: spec.name == "brief" ? attachDueReminders : nil
             ))
             return .handled
+        }
+    }
+
+    /// The brief's answer gets today's due reminders as clickable rows underneath.
+    private var attachDueReminders: @MainActor (StoredMessage) async -> Void {
+        { [weak self] reply in
+            guard let self else { return }
+            let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now))!
+            if let due = try? await dueReminders(before: tomorrow), !due.isEmpty {
+                reply.attachments = [.reminders(title: "Reminders due", items: due)]
+            }
         }
     }
 
@@ -91,6 +105,9 @@ extension AppModel {
         case "auto":
             selectAuto(for: conversation)
             return .handled
+
+        case _ where Self.calendarHandlers.contains(handler):
+            return runCalendarCommand(handler, input: input, text: text, in: conversation, context: context)
 
         default:
             return .failed("/\(input.name) isn't available yet.")

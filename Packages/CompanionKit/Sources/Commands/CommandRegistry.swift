@@ -40,6 +40,43 @@ public struct CommandRegistry: Sendable {
         return prefix + contains
     }
 
+    /// Calendar and reminder commands (personal: they always run in Chat).
+    public static let calendar: [CommandSpec] = [
+        CommandSpec(name: "today", summary: "Today's events and due reminders", kind: .native(handler: "today"), scope: .personal),
+        CommandSpec(name: "tomorrow", summary: "Tomorrow's events", kind: .native(handler: "tomorrow"), scope: .personal),
+        CommandSpec(name: "week", summary: "Events for the next seven days", kind: .native(handler: "week"), scope: .personal),
+        CommandSpec(name: "agenda", summary: "Events on a given day", argumentHint: "<date>", kind: .native(handler: "agenda"), scope: .personal),
+        CommandSpec(name: "free", summary: "Free time in your calendar", argumentHint: "<30m|1h> [day]", kind: .native(handler: "free"), scope: .personal),
+        CommandSpec(name: "reminders", summary: "Open reminders, overdue first", argumentHint: "[list]", kind: .native(handler: "reminders"), scope: .personal),
+        CommandSpec(
+            name: "remind", summary: "Create a reminder", argumentHint: "<what> [when]",
+            kind: .prompt(PromptCommand(
+                template: """
+                    Create one reminder for this request: $ARGUMENTS
+                    Now is {{now}}. Work out the due day and time from the request (relative words like "tomorrow" or \
+                    "Friday 6pm" are relative to now). If no time is given, set only the day; if no day is given, set no \
+                    due date. Use the request's language for the title. Then confirm in one short sentence.
+                    """,
+                task: .chat,
+                tools: ["create_reminder"]
+            )),
+            scope: .personal
+        ),
+        CommandSpec(
+            name: "brief", summary: "Your brief for today: calendar, reminders, free time",
+            kind: .prompt(PromptCommand(
+                template: """
+                    Give me my brief for {{today}} ({{date}}): today's events with times, anything I should prepare for, \
+                    reminders that are due today or overdue, and my free time today. Mention tomorrow's first event if \
+                    it starts early. Keep it short and skimmable. $ARGUMENTS
+                    """,
+                task: .chat,
+                tools: ["calendar_events", "free_slots", "reminders"]
+            )),
+            scope: .personal
+        ),
+    ]
+
     /// The commands every installation has; the app implements the native handlers.
     public static let general: [CommandSpec] = [
         CommandSpec(name: "help", summary: "List all commands", kind: .native(handler: "help"), scope: .general),

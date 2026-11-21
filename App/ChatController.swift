@@ -14,6 +14,8 @@ struct TurnPlan {
     var targetLanguage: String
     var tools: [any Tool]
     var policy: ToolPolicy
+    /// Runs after a successful reply (e.g. /brief attaches the due reminders).
+    var finalize: (@MainActor (StoredMessage) async -> Void)?
 }
 
 /// Runs model turns for conversations. Streams keep running when the user switches conversations.
@@ -139,6 +141,7 @@ final class ChatController {
                         }
                     }
                 }
+                if let finalize = plan.finalize, reply.errorText == nil { await finalize(reply) }
             } catch is CancellationError {
                 cancelled = true
             } catch let error as URLError where error.code == .cancelled {

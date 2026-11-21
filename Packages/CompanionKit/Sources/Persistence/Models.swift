@@ -1,5 +1,6 @@
 import Automation
 import CompanionCore
+import PersonalData
 import Foundation
 import Routing
 import SwiftData
@@ -52,8 +53,8 @@ public final class Conversation {
     /// The transcript in provider-neutral form, skipping empty assistant placeholders.
     public var chatMessages: [ChatMessage] {
         orderedMessages
-            .filter { !($0.role == .assistant && $0.content.isEmpty) }
-            .map { ChatMessage(role: $0.role, content: $0.modelContent ?? $0.content) }
+            .filter { !($0.role == .assistant && $0.content.isEmpty && $0.attachmentsData == nil) }
+            .map { ChatMessage(role: $0.role, content: $0.textForModel) }
     }
 }
 
@@ -73,6 +74,8 @@ public final class StoredMessage {
     public var errorText: String?
     /// JSON-encoded `[ToolStep]` (kept as Data to stay a plain attribute in SwiftData).
     public var toolStepsData: Data?
+    /// JSON-encoded `[MessageAttachment]`: structured, interactive content (e.g. a reminder list).
+    public var attachmentsData: Data?
     public var conversation: Conversation?
 
     public init(role: Role, content: String, order: Int, modelID: String? = nil, task: TaskKind? = nil) {
@@ -92,6 +95,32 @@ public final class StoredMessage {
     public var toolSteps: [ToolStep] {
         get { toolStepsData.flatMap { try? JSONDecoder().decode([ToolStep].self, from: $0) } ?? [] }
         set { toolStepsData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
+    }
+
+    public var attachments: [MessageAttachment] {
+        get { attachmentsData.flatMap { try? JSONDecoder().decode([MessageAttachment].self, from: $0) } ?? [] }
+        set { attachmentsData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue) }
+    }
+
+    /// What the model receives for this message: content plus a text form of the attachments.
+    public var textForModel: String {
+        let text = modelContent ?? content
+        let extra = attachments.map(\.textForModel).filter { !$0.isEmpty }
+        return extra.isEmpty ? text : ([text] + extra).filter { !$0.isEmpty }.joined(separator: "\n\n")
+    }
+}
+
+/// Structured content shown interactively in the transcript.
+public enum MessageAttachment: Codable, Sendable, Hashable {
+    /// A reminder list with checkboxes, due-date menus and delete.
+    case reminders(title: String, items: [ReminderItem])
+
+    public var textForModel: String {
+        switch self {
+        case .reminders(let title, let items):
+            guard !items.isEmpty else { return "\(title): none" }
+            return "\(title):\n" + items.map { "- " + AgendaFormatter.reminderLine($0) + " (id \($0.id))" }.joined(separator: "\n")
+        }
     }
 }
 

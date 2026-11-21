@@ -2,6 +2,7 @@ import AppleIntelligence
 import CompanionCore
 import Foundation
 import Knowledge
+import PersonalData
 import Observation
 import Persistence
 import Providers
@@ -85,6 +86,27 @@ final class AppModel {
 
     enum SidebarMode: String { case chats, automations }
 
+    // MARK: Assistant settings
+
+    /// Calendars and reminder lists the assistant must not see (identifiers).
+    var hiddenCalendars: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "hiddenCalendars") ?? []) {
+        didSet {
+            UserDefaults.standard.set(Array(hiddenCalendars), forKey: "hiddenCalendars")
+            let hidden = hiddenCalendars
+            Task { await EventKitStore.shared.setHiddenCalendars(hidden) }
+        }
+    }
+
+    /// Lets create_reminder run without an approval card.
+    var remindersWithoutAsking: Bool = UserDefaults.standard.bool(forKey: "remindersWithoutAsking") {
+        didSet { UserDefaults.standard.set(remindersWithoutAsking, forKey: "remindersWithoutAsking") }
+    }
+
+    /// Write tools the user allowed globally.
+    var standingApprovals: Set<String> {
+        remindersWithoutAsking ? [PersonalToolName.createReminder] : []
+    }
+
     /// What the sidebar lists (persisted).
     var sidebarMode: SidebarMode = SidebarMode(rawValue: UserDefaults.standard.string(forKey: "sidebarMode") ?? "") ?? .chats {
         didSet { UserDefaults.standard.set(sidebarMode.rawValue, forKey: "sidebarMode") }
@@ -143,6 +165,8 @@ final class AppModel {
             .flatMap { try? JSONDecoder().decode(HotKeyShortcut?.self, from: $0) } ?? .optionSpace
         showMenuBarIcon = defaults.object(forKey: Keys.showMenuBarIcon) as? Bool ?? true
         knowledge = KnowledgeModel(defaults: defaults)
+        let hidden = Set(defaults.stringArray(forKey: "hiddenCalendars") ?? [])
+        Task { await EventKitStore.shared.setHiddenCalendars(hidden) }
         knowledge.ollama = { [weak self] in self?.ollamaProvider ?? OllamaProvider() }
     }
 
@@ -297,19 +321,32 @@ final class AppModel {
         }
     }
 
+    /// The task's tools; local-only tasks (Chat) also get the personal tools the user granted access to.
     func makeTools(for profile: TaskProfile) -> [any Tool] {
-        makeTools(named: profile.tools)
+        var tools = makeTools(named: profile.tools)
+        if profile.localOnly {
+            tools += CalendarToolbox.tools(
+                store: EventKitStore.shared,
+                events: EventKitStore.eventsAuthorized,
+                reminders: EventKitStore.remindersAuthorized
+            )
+        }
+        return tools
     }
 
     func makeTools(named names: [String]) -> [any Tool] {
-        names.compactMap { name -> (any Tool)? in
+        let personal = CalendarToolbox.tools(
+            store: EventKitStore.shared, events: EventKitStore.eventsAuthorized, reminders: EventKitStore.remindersAuthorized
+        )
+        return names.compactMap { name -> (any Tool)? in
+            if let tool = personal.first(where: { $0.spec.name == name }) { return tool }
             switch name {
             case TaskProfile.ToolName.webSearch:
                 // Self-hosted or keyed backends can be offline; Wikipedia always answers.
-                WebSearchTool(backend: makeSearchBackend(), fallback: searchBackend == .wikipedia ? nil : WikipediaSearchBackend())
-            case TaskProfile.ToolName.fetchPage: FetchPageTool()
-            case TaskProfile.ToolName.searchDocuments: knowledge.makeTool()
-            default: nil
+                return WebSearchTool(backend: makeSearchBackend(), fallback: searchBackend == .wikipedia ? nil : WikipediaSearchBackend())
+            case TaskProfile.ToolName.fetchPage: return FetchPageTool()
+            case TaskProfile.ToolName.searchDocuments: return knowledge.makeTool()
+            default: return nil
             }
         }
     }
@@ -370,10 +407,14 @@ final class AppModel {
                 profile: profile,
                 model: ref.model,
                 targetLanguage: targetLanguage,
-                tools: makeTools(named: command?.tools ?? profile.tools),
-                policy: ToolPolicy(providerIsLocal: config.isLocal, autoApproved: command?.autoApproved ?? []) { request in
+                tools: command?.tools.map { makeTools(named: $0) } ?? makeTools(for: profile),
+                policy: ToolPolicy(
+                    providerIsLocal: config.isLocal,
+                    autoApproved: (command?.autoApproved ?? []).union(profile.localOnly ? standingApprovals : [])
+                ) { request in
                     await approvals.request(request)
-                }
+                },
+                finalize: command?.finalize
             )
         }
     }

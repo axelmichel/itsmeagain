@@ -112,6 +112,9 @@ import Testing
     @Test func completesByPrefixThenContains() {
         let registry = CommandRegistry(builtIns: CommandRegistry.general, user: [user])
         #expect(registry.completions(for: "/").count == 5)
+        let full = CommandRegistry(builtIns: CommandRegistry.general + CommandRegistry.calendar, user: [user])
+        #expect(full.completions(for: "/to").map(\.name) == ["today", "tomorrow", "auto"], "prefix matches first")
+        #expect(full.command(named: "remind")?.scope == .personal)
         #expect(registry.completions(for: "/s").map(\.name) == ["standup", "task"], "prefix match first, then contains")
         #expect(registry.completions(for: "/ew").map(\.name) == ["new"], "contains-match as fallback")
         #expect(registry.completions(for: "/su").map(\.name) == ["standup"], "aliases complete too")

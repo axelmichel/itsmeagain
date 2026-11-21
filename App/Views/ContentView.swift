@@ -46,6 +46,10 @@ struct ContentView: View {
                         } actions: {
                             Button("New Automation", action: newAutomation)
                                 .buttonStyle(.borderless)
+                            Button("Add Morning Brief (/brief, weekdays 07:30)") {
+                                newAutomation(name: "Morning brief", command: "/brief")
+                            }
+                            .buttonStyle(.borderless)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Theme.canvas)
@@ -88,7 +92,11 @@ struct ContentView: View {
     }
 
     private func newAutomation() {
-        let fresh = Automation(name: "New Automation", command: "", trigger: .daily(hour: 7, minute: 30, weekdays: [2, 3, 4, 5, 6]))
+        newAutomation(name: "New Automation", command: "")
+    }
+
+    private func newAutomation(name: String, command: String) {
+        let fresh = Automation(name: name, command: command, trigger: .daily(hour: 7, minute: 30, weekdays: [2, 3, 4, 5, 6]))
         context.insert(fresh)
         try? context.save()
         app.sidebarMode = .automations

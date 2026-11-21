@@ -9,6 +9,9 @@ struct SettingsView: View {
             Tab("General", systemImage: "gearshape") {
                 GeneralSettings()
             }
+            Tab("Assistant", systemImage: "person.crop.circle") {
+                AssistantSettings()
+            }
             Tab("Providers", systemImage: "server.rack") {
                 ProviderSettings()
             }

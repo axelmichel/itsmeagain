@@ -1,4 +1,5 @@
 import CompanionCore
+import PersonalData
 import Foundation
 import SwiftData
 import Testing
@@ -28,6 +29,11 @@ import Testing
         conversation.append(role: .user, content: "/standup API").modelContent = "Draft my stand-up. Focus: API"
         #expect(conversation.orderedMessages.last?.content == "/standup API")
         #expect(conversation.chatMessages.last == .user("Draft my stand-up. Focus: API"))
+
+        // Attachments reach the model as text, so follow-up questions about them work.
+        let list = conversation.append(role: .assistant, content: "")
+        list.attachments = [.reminders(title: "Open reminders", items: [ReminderItem(id: "r1", title: "Pay rent", list: "Home")])]
+        #expect(conversation.chatMessages.last == .assistant("Open reminders:\n- Pay rent [Home] (id r1)"))
     }
 }
 
